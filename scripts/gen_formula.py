@@ -19,17 +19,24 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
-# Packages to include as `resource` blocks. These are runtime deps of the tool.
-RUNTIME_DEPS = ["pymupdf", "Pillow", "click", "rich", "pytesseract",
-                "markdown-it-py", "mdurl", "Pygments"]
+# Direct runtime deps from pyproject.toml. Transitive deps are resolved
+# automatically from importlib.metadata so we never miss one (see issue #12).
+DIRECT_DEPS = ["pymupdf", "Pillow", "click", "rich", "pytesseract"]
 
 
-def installed_version(pkg: str) -> str:
-    """Return the version installed in the current env via importlib.metadata."""
+def _normalize(name: str) -> str:
+    """PyPI-normalized package name (lowercase, hyphens)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _get_version(pkg: str) -> Optional[str]:
+    """Return installed version, or None if not installed."""
     try:
         from importlib.metadata import version, PackageNotFoundError
     except ImportError:  # pragma: no cover
@@ -37,8 +44,92 @@ def installed_version(pkg: str) -> str:
     try:
         return version(pkg)
     except PackageNotFoundError:
+        return None
+
+
+def installed_version(pkg: str) -> str:
+    """Return the version installed in the current env, or exit if missing."""
+    v = _get_version(pkg)
+    if v is None:
         print(f"  [warn] {pkg} not installed; please `pip install {pkg}` first.")
         sys.exit(1)
+    return v
+
+
+def _marker_applies_on_macos(marker_str: str) -> bool:
+    """Evaluate a PEP 508 marker as if we were on macOS (Darwin).
+
+    We always generate the formula for macOS consumers - so Windows- or
+    Linux-only deps should be skipped. Extras-only markers are always
+    skipped. If the marker can't be parsed, default to True (conservative).
+    """
+    if not marker_str.strip():
+        return True
+    # Fast path: extras-only markers are never satisfied in this context
+    if "extra ==" in marker_str and not any(
+        k in marker_str for k in ("platform_", "sys_platform", "os_name", "python_")
+    ):
+        return False
+    try:
+        from packaging.markers import Marker
+    except ImportError:
+        return True  # conservative
+    env = {
+        "os_name": "posix",
+        "sys_platform": "darwin",
+        "platform_system": "Darwin",
+        "platform_machine": "arm64",
+        "platform_release": "24.0.0",
+        "python_version": "3.12",
+        "python_full_version": "3.12.0",
+        "implementation_name": "cpython",
+        "platform_python_implementation": "CPython",
+        "extra": "",
+    }
+    try:
+        return Marker(marker_str).evaluate(env)
+    except Exception:
+        return True
+
+
+def resolve_all_runtime_deps(direct: list[str]) -> list[str]:
+    """Walk `importlib.metadata.requires()` transitively from direct deps and
+    return a de-duplicated list of all runtime packages that need resource
+    blocks in the Homebrew formula, as evaluated for macOS.
+
+    Skips extras-only deps and platform-conditional deps that don't apply
+    to macOS.
+    """
+    try:
+        from importlib.metadata import requires as md_requires
+    except ImportError:  # pragma: no cover
+        from importlib_metadata import requires as md_requires  # type: ignore
+
+    seen: dict[str, str] = {}  # normalized name -> original casing
+
+    def visit(pkg: str) -> None:
+        norm = _normalize(pkg)
+        if norm in seen:
+            return
+        if _get_version(pkg) is None:
+            return
+        seen[norm] = pkg
+        try:
+            reqs = md_requires(pkg) or []
+        except Exception:
+            reqs = []
+        for req in reqs:
+            marker = req.split(";", 1)[1] if ";" in req else ""
+            if not _marker_applies_on_macos(marker):
+                continue
+            name = re.split(r"[\s;<>=!~\[]", req, 1)[0].strip()
+            if not name:
+                continue
+            visit(name)
+
+    for d in direct:
+        visit(d)
+    return list(seen.values())
 
 
 def pypi_sdist(pkg: str, ver: str) -> tuple[str, str, str]:
@@ -83,9 +174,14 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    print("==> Walking transitive deps from direct runtime deps")
+    runtime_deps = resolve_all_runtime_deps(DIRECT_DEPS)
+    print(f"  direct: {DIRECT_DEPS}")
+    print(f"  all runtime (incl. transitive): {runtime_deps}")
+
     print("==> Resolving resources from PyPI")
     resources = []
-    for pkg in RUNTIME_DEPS:
+    for pkg in runtime_deps:
         ver = installed_version(pkg)
         canonical, url, sha = pypi_sdist(pkg, ver)
         print(f"  {canonical}=={ver}")
