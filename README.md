@@ -5,11 +5,13 @@ A Python command-line tool that **compresses large PDF files (1GB+)** down to a 
 It processes PDFs page-by-page, so it **never loads the whole file into RAM** — well-suited for scanned documents and files packed with high-quality images.
 
 ```bash
-brew tap repo-phuocdt/pdf-compressor-cli
-brew install pdf-compressor
+# Fastest install (recommended) — works on macOS, Linux, Windows:
+pipx install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
 
 pdf-compressor /path/to/big.pdf      # done — no source clone needed
 ```
+
+> Prefer Homebrew? See the [Homebrew tap option](#option-2-homebrew-tap) below.
 
 ---
 
@@ -41,34 +43,47 @@ pdf-compressor /path/to/big.pdf      # done — no source clone needed
 
 Once installed, just run `pdf-compressor <file>` from any terminal — **no source clone, no venv activation required**.
 
-### Option 1: Homebrew (recommended on macOS)
-
-```bash
-brew tap repo-phuocdt/pdf-compressor-cli
-brew install pdf-compressor
-```
-
-After installation the command is available in `$PATH`:
-
-```bash
-pdf-compressor big.pdf                   # compress using the medium preset
-pdf-compressor big.pdf -q low -t 25      # low preset, 25 MB target
-pdf-compressor                           # open the interactive shell
-```
-
-> The formula also installs `tesseract` automatically (via `depends_on`) so `--ocr` works out of the box.
-
-### Option 2: pipx (one command, no brew tap)
+### Option 1: pipx (fastest, works everywhere)
 
 ```bash
 pipx install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
 ```
 
-`pipx` creates an isolated venv for the tool and puts `pdf-compressor` on your `$PATH`.
+`pipx` creates an isolated venv for the tool and puts `pdf-compressor` on your `$PATH`. This is the **recommended quick path** — it works on macOS, Linux, and Windows with no extra setup.
 
-If you don't have pipx yet: `brew install pipx && pipx ensurepath`. For OCR: `brew install tesseract`.
+If you don't have pipx yet:
 
-### Option 3: pip
+```bash
+brew install pipx && pipx ensurepath
+```
+
+For OCR support: `brew install tesseract`.
+
+### Option 2: Homebrew tap
+
+You need to `brew tap` this repo first (Homebrew doesn't auto-discover formulas from arbitrary repos):
+
+```bash
+brew tap repo-phuocdt/pdf-compressor-cli https://github.com/repo-phuocdt/pdf-compressor-cli.git
+brew install pdf-compressor
+```
+
+> **Why `brew install pdf-compressor` alone doesn't work**: Homebrew only searches `homebrew-core` by default. You must either `brew tap` first, or install directly from the formula URL:
+>
+> ```bash
+> brew install --build-from-source \
+>   https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/Formula/pdf-compressor.rb
+> ```
+
+To always track the latest master (no pinned version):
+
+```bash
+brew install --HEAD pdf-compressor
+```
+
+The formula also pulls in `tesseract` (as a recommended dep) so `--ocr` works out of the box.
+
+### Option 3: pip (global install)
 
 ```bash
 pip install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
@@ -78,7 +93,7 @@ pip install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
 
 ```bash
 git clone https://github.com/repo-phuocdt/pdf-compressor-cli.git
-cd pdf-compressor
+cd pdf-compressor-cli
 chmod +x setup.sh && ./setup.sh
 source venv/bin/activate
 pdf-compressor --help

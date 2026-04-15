@@ -9,8 +9,8 @@ URL + sha256 from PyPI, and writes a `Language::Python::Virtualenv` formula.
 Usage:
     # First install the package + deps so we resolve the exact versions:
     python3 -m pip install .
-    python3 scripts/gen_formula.py \
-        --source-url https://github.com/repo-phuocdt/pdf-compressor-cli/archive/refs/tags/v0.1.0.tar.gz \
+    python3 scripts/gen_formula.py \\
+        --source-url https://github.com/repo-phuocdt/pdf-compressor-cli/archive/refs/tags/v0.1.0.tar.gz \\
         --source-sha256 <SHA>
 
 If --source-sha256 is omitted, placeholder will be left in the formula.
@@ -99,11 +99,12 @@ def main() -> int:
   url "{args.source_url}"
   sha256 "{args.source_sha256}"
   license "MIT"
+  head "https://github.com/repo-phuocdt/pdf-compressor-cli.git", branch: "master"
 
   depends_on "python@3.12"
   depends_on "tesseract" => :recommended # needed only for --ocr
 
-{''.join(resources)}
+{{''.join(resources)}}
   def install
     virtualenv_install_with_resources
   end
@@ -118,7 +119,8 @@ end
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(formula)
     print(f"\n==> Wrote {out_path}")
-    print("Remember to update YOUR_USER and the release tarball sha256.")
+    print("If you pinned --source-url to a commit tarball, no tag needed.")
+    print("Otherwise remember to tag the release and update --source-sha256.")
     return 0
 
 
