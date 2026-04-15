@@ -3,9 +3,9 @@ class PdfCompressorCli < Formula
 
   desc "Compress large PDFs to an AI-friendly size (page-by-page, memory efficient)"
   homepage "https://github.com/repo-phuocdt/pdf-compressor-cli"
-  url "https://github.com/repo-phuocdt/pdf-compressor-cli/archive/1b00da37fb9587fe5cd7b54101b8fc3504a91bda.tar.gz"
+  url "https://github.com/repo-phuocdt/pdf-compressor-cli/archive/ff62c4333cbc03fbfe72eb55e6f10fab3cc6378e.tar.gz"
   version "0.1.0"
-  sha256 "2f39f27fe3fac450a5858f0d48128a2b7a78190ceb997b7720630ff41669c672"
+  sha256 "a6f5f75cc6a366cb760cf85ebd0328a5cb99401e4f30820ccf113da73166f6e6"
   license "MIT"
   head "https://github.com/repo-phuocdt/pdf-compressor-cli.git", branch: "master"
 
@@ -28,10 +28,6 @@ class PdfCompressorCli < Formula
     url "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz"
     sha256 "edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36"
   end
-  resource "pytesseract" do
-    url "https://files.pythonhosted.org/packages/9f/a6/7d679b83c285974a7cb94d739b461fa7e7a9b17a3abfd7bf6cbc5c2394b0/pytesseract-0.3.13.tar.gz"
-    sha256 "4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9"
-  end
   resource "markdown-it-py" do
     url "https://files.pythonhosted.org/packages/5b/f5/4ec618ed16cc4f8fb3b701563655a69816155e79e24a17b651541804721d/markdown_it_py-4.0.0.tar.gz"
     sha256 "cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3"
@@ -43,6 +39,14 @@ class PdfCompressorCli < Formula
   resource "Pygments" do
     url "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz"
     sha256 "6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f"
+  end
+  resource "pytesseract" do
+    url "https://files.pythonhosted.org/packages/9f/a6/7d679b83c285974a7cb94d739b461fa7e7a9b17a3abfd7bf6cbc5c2394b0/pytesseract-0.3.13.tar.gz"
+    sha256 "4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9"
+  end
+  resource "packaging" do
+    url "https://files.pythonhosted.org/packages/ee/b5/b43a27ac7472e1818c4bafd44430e69605baefe1f34440593e0332ec8b4d/packaging-24.0.tar.gz"
+    sha256 "eb82c5e3e56209074766e6885bb04b8c38a0c015d0a30036ebe7ece34c9989e9"
   end
 
   def install
