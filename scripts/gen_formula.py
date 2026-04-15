@@ -9,8 +9,8 @@ URL + sha256 from PyPI, and writes a `Language::Python::Virtualenv` formula.
 Usage:
     # First install the package + deps so we resolve the exact versions:
     python3 -m pip install .
-    python3 scripts/gen_formula.py \\
-        --source-url https://github.com/repo-phuocdt/pdf-compressor-cli/archive/refs/tags/v0.1.0.tar.gz \\
+    python3 scripts/gen_formula.py \
+        --source-url https://github.com/repo-phuocdt/pdf-compressor-cli/archive/refs/tags/v0.1.0.tar.gz \
         --source-sha256 <SHA>
 
 If --source-sha256 is omitted, placeholder will be left in the formula.
@@ -104,7 +104,7 @@ def main() -> int:
   depends_on "python@3.12"
   depends_on "tesseract" => :recommended # needed only for --ocr
 
-{{''.join(resources)}}
+{''.join(resources)}
   def install
     virtualenv_install_with_resources
   end
