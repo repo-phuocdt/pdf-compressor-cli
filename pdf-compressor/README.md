@@ -8,7 +8,8 @@ Tool xử lý PDF theo từng page (page-by-page) nên **không load toàn bộ 
 
 ## Tính năng
 
-- **Interactive mode**: chạy không có argument → hỏi từng option theo kiểu wizard (giống Claude Code)
+- **Interactive shell**: chạy không có argument → mở REPL kiểu Claude Code với slash commands (`/preset`, `/target`, `/compress`, …), state giữ lại giữa các lệnh, nén nhiều file trong một session
+- **Wizard mode** (`--wizard`): hỏi từng option một rồi chạy một lần
 - Nén ảnh trong PDF (giảm DPI + re-encode JPEG) theo 3 preset: `low` / `medium` / `high`
 - Tự động binary search quality để đạt **target size** theo MB
 - Chọn **page range** (ví dụ `1-50` hoặc `1,3,5-10`)
@@ -55,31 +56,66 @@ python compress_pdf.py --help
 
 ## Sử dụng nhanh
 
-### Interactive mode (khuyến nghị cho người mới)
+### Interactive shell (claudekit-style REPL) — mặc định
 
-Chạy không có argument hoặc với `-I`, tool sẽ hỏi từng option một:
+Chạy không kèm argument → tool mở một **shell tương tác** kiểu Claude Code: gõ slash command, state giữ lại giữa các lệnh, có thể nén nhiều file liên tiếp không cần thoát:
 
 ```bash
 python compress_pdf.py
 # hoặc
 python compress_pdf.py -I
+# hoặc pre-load sẵn file:
+python compress_pdf.py -i big.pdf -I
 ```
 
-Tool sẽ lần lượt hỏi:
+Ví dụ một session:
 
-1. **Input PDF path** — đường dẫn file PDF (hỗ trợ `~`, env vars, kéo-thả)
-2. **Output path** — mặc định `{name}_compressed.pdf`
-3. **Quality preset** — `low` / `medium` / `high`
-4. **Target size (MB)?** — y/n, nếu có thì nhập số MB
-5. **Override DPI?** — y/n, nếu có thì nhập DPI tùy chỉnh
-6. **Page range?** — y/n, nếu có thì nhập `"1-50"` / `"1,3,5-10"`
-7. **Split output?** — y/n, nếu có thì nhập MB mỗi chunk
-8. **OCR?** — y/n
-9. **Verbose?** — y/n
+```
+pdf-compressor› /help                      # xem tất cả lệnh
+pdf-compressor› /preset low                # đổi preset
+pdf-compressor› /target 25                 # set target size 25 MB
+pdf-compressor› /pages 1-50                # chỉ lấy 50 page đầu
+pdf-compressor› /status                    # xem cấu hình hiện tại
+pdf-compressor› big.pdf                    # chỉ paste path → compress luôn
+pdf-compressor› another.pdf                # file tiếp theo, vẫn dùng setting cũ
+pdf-compressor› /target off                # bỏ target, quay về preset
+pdf-compressor› /exit                      # thoát
+```
 
-Sau đó hiển thị bảng tóm tắt và hỏi **Proceed?** để xác nhận. Có thể Ctrl+C để hủy bất cứ lúc nào.
+#### Danh sách slash command
 
-> Tip: nếu đã biết input file, chạy `python compress_pdf.py -i big.pdf -I` để tool skip câu hỏi đầu và hỏi các option còn lại.
+| Lệnh | Mô tả |
+| --- | --- |
+| `/help`, `/?` | Hiện bảng lệnh |
+| `/status`, `/show` | Hiện setting hiện tại |
+| `/preset <low\|medium\|high>` | Đổi preset |
+| `/target <MB> \| off` | Set target size MB |
+| `/dpi <N> \| off` | Override DPI |
+| `/pages <range> \| all` | Đặt page range (`"1-50"` / `"1,3,5-10"`) |
+| `/split <MB> \| off` | Split output |
+| `/ocr on\|off` | Bật/tắt OCR (gõ `/ocr` không tham số để toggle) |
+| `/verbose on\|off` | Bật/tắt verbose |
+| `/output <path> \| default` | Đặt output path |
+| `/compress <path>` | Compress file với setting hiện tại |
+| `<path>` | Shortcut cho `/compress <path>` (paste/drag file trực tiếp) |
+| Enter (dòng trống) | Chạy lại với file đã compress gần nhất |
+| `/reset` | Reset setting về mặc định |
+| `/clear`, `/cls` | Clear màn hình |
+| `/exit`, `/quit`, `q`, Ctrl+D | Thoát shell |
+
+**Mẹo**: Ctrl+C ở prompt sẽ huỷ dòng đang gõ (không thoát shell). Ctrl+C khi đang compress sẽ huỷ job hiện tại và quay về shell.
+
+---
+
+### Wizard mode (one-shot, hỏi tuần tự rồi exit)
+
+Nếu bạn chỉ cần chạy một lần và muốn tool hỏi từng option:
+
+```bash
+python compress_pdf.py --wizard
+```
+
+Tool sẽ lần lượt hỏi input/output/quality/target/pages/split/OCR/verbose rồi hiển thị bảng xác nhận → chạy → exit.
 
 ---
 
@@ -142,8 +178,9 @@ python compress_pdf.py -i big.pdf -v
 
 | Flag | Mô tả |
 | --- | --- |
-| `-i, --input FILE` | File PDF đầu vào. Nếu bỏ qua sẽ tự vào interactive mode |
-| `-I, --interactive` | Bắt buộc vào interactive mode (hỏi từng option) |
+| `-i, --input FILE` | File PDF đầu vào. Nếu bỏ qua sẽ tự mở interactive shell |
+| `-I, --interactive` | Bắt buộc mở interactive shell (claudekit-style REPL) |
+| `--wizard` | One-shot wizard: hỏi từng option rồi exit |
 | `-o, --output FILE` | File đầu ra (mặc định: `{name}_compressed.pdf`) |
 | `-q, --quality TEXT` | Preset: `low` \| `medium` \| `high` (mặc định: `medium`) |
 | `-t, --target-size INT` | Target size (MB). Tự binary-search quality |

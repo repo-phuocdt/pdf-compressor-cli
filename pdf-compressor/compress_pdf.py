@@ -713,6 +713,461 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
     }
 
 
+# ---------- REPL shell (claudekit-style) ----------
+
+
+REPL_BANNER = r"""
+ ____  ____  _____    ____
+|  _ \|  _ \|  ___|  / ___|___  _ __ ___  _ __  _ __ ___  ___ ___  ___  _ __
+| |_) | | | | |_    | |   / _ \| '_ ` _ \| '_ \| '__/ _ \/ __/ __|/ _ \| '__|
+|  __/| |_| |  _|   | |__| (_) | | | | | | |_) | | |  __/\__ \__ \ (_) | |
+|_|   |____/|_|      \____\___/|_| |_| |_| .__/|_|  \___||___/___/\___/|_|
+                                         |_|
+"""
+
+
+def _default_state() -> dict:
+    """Initial REPL state (all compression options)."""
+    return {
+        "preset": "medium",
+        "target_size": None,   # int MB or None
+        "dpi": None,           # int or None (None = use preset)
+        "pages": None,         # str or None
+        "split_mb": None,      # int MB or None
+        "ocr": False,
+        "verbose": False,
+        "output_path": None,   # str or None (None = auto)
+    }
+
+
+def _print_status(state: dict) -> None:
+    """Render current state as a table."""
+    preset_dpi = QUALITY_PRESETS[state["preset"]][0]
+    preset_q = QUALITY_PRESETS[state["preset"]][1]
+    t = Table(title="Current settings", show_header=False, box=None)
+    t.add_column(style="cyan", no_wrap=True)
+    t.add_column(style="green")
+    t.add_row("preset", f"{state['preset']}  (DPI={preset_dpi}, JPEG q={preset_q})")
+    t.add_row("target size", f"{state['target_size']} MB" if state["target_size"] else "—")
+    t.add_row("dpi override", str(state["dpi"]) if state["dpi"] else "—")
+    t.add_row("pages", state["pages"] or "all")
+    t.add_row("split", f"{state['split_mb']} MB" if state["split_mb"] else "—")
+    t.add_row("ocr", "on" if state["ocr"] else "off")
+    t.add_row("verbose", "on" if state["verbose"] else "off")
+    t.add_row("output", state["output_path"] or "auto ({name}_compressed.pdf)")
+    console.print(t)
+
+
+def _print_help() -> None:
+    """Render the slash-command help table."""
+    t = Table(title="Commands", show_lines=False, header_style="bold")
+    t.add_column("Command", style="cyan", no_wrap=True)
+    t.add_column("Description")
+    t.add_row("/help, /?", "Show this help")
+    t.add_row("/status, /show", "Show current settings")
+    t.add_row("/preset <low|medium|high>", "Set quality preset")
+    t.add_row("/target <MB> | off", "Set target output size (binary-search mode)")
+    t.add_row("/dpi <N> | off", "Override preset DPI")
+    t.add_row("/pages <range> | all", 'Page range, e.g. "1-50" or "1,3,5-10"')
+    t.add_row("/split <MB> | off", "Split output into chunks of N MB")
+    t.add_row("/ocr on|off", "Toggle OCR text layer")
+    t.add_row("/verbose on|off", "Toggle verbose logging")
+    t.add_row("/output <path> | default", "Set output path template")
+    t.add_row("/compress <path>", "Compress a PDF using current settings")
+    t.add_row("<path>", "Shortcut for /compress <path>")
+    t.add_row("/reset", "Reset all settings to defaults")
+    t.add_row("/clear, /cls", "Clear the screen")
+    t.add_row("/exit, /quit, q", "Exit the shell")
+    console.print(t)
+
+
+def _parse_on_off(arg: str) -> Optional[bool]:
+    """Parse on/off/true/false/1/0/yes/no to bool, None on invalid."""
+    s = arg.strip().lower()
+    if s in ("on", "true", "1", "yes", "y"):
+        return True
+    if s in ("off", "false", "0", "no", "n"):
+        return False
+    return None
+
+
+def _resolve_path(raw: str) -> str:
+    """Clean up a user-provided path (quotes, ~, env vars)."""
+    s = raw.strip().strip('"').strip("'")
+    # Handle escaped spaces from macOS drag-drop: "My\ File.pdf"
+    s = s.replace("\\ ", " ")
+    return os.path.expanduser(os.path.expandvars(s))
+
+
+def _run_compression_with_state(state: dict, input_path: str) -> None:
+    """Execute a full compression using current REPL state. Never raises out of
+    the REPL — errors are printed and control returns to the shell."""
+    if not os.path.exists(input_path):
+        console.print(f"[red]File not found:[/red] {input_path}")
+        return
+    if os.path.isdir(input_path):
+        console.print(f"[red]Path is a directory:[/red] {input_path}")
+        return
+
+    preset_dpi = QUALITY_PRESETS[state["preset"]][0]
+    preset_q = QUALITY_PRESETS[state["preset"]][1]
+    effective_dpi = state["dpi"] if state["dpi"] is not None else preset_dpi
+
+    # Resolve output path
+    in_p = Path(input_path)
+    if state["output_path"]:
+        output_path = state["output_path"]
+    else:
+        output_path = str(in_p.with_name(f"{in_p.stem}_compressed.pdf"))
+
+    # Parse page range
+    selected_pages: Optional[List[int]] = None
+    if state["pages"]:
+        try:
+            probe = fitz.open(input_path)
+            try:
+                if probe.is_encrypted:
+                    console.print("[red]PDF is encrypted. Decrypt it first.[/red]")
+                    return
+                selected_pages = parse_page_range(state["pages"], probe.page_count)
+            finally:
+                probe.close()
+        except click.ClickException as exc:
+            console.print(f"[red]{exc.message}[/red]")
+            return
+
+    if state["ocr"] and not HAS_TESSERACT:
+        console.print(
+            "[yellow]OCR requested but pytesseract not installed; skipping.[/yellow]"
+        )
+
+    try:
+        if state["target_size"]:
+            stats = compress_to_target(
+                input_path=input_path,
+                output_path=output_path,
+                target_mb=state["target_size"],
+                dpi=effective_dpi,
+                pages=selected_pages,
+                do_ocr=state["ocr"],
+                verbose=state["verbose"],
+            )
+        else:
+            stats = compress_pdf(
+                input_path=input_path,
+                output_path=output_path,
+                dpi=effective_dpi,
+                jpeg_quality=preset_q,
+                pages=selected_pages,
+                do_ocr=state["ocr"],
+                verbose=state["verbose"],
+            )
+    except click.ClickException as exc:
+        console.print(f"[red]{exc.message}[/red]")
+        return
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Compression cancelled. Cleaning up...[/yellow]")
+        cleanup_temp_files()
+        return
+    except Exception as exc:
+        console.print(f"[red]Compression failed:[/red] {exc}")
+        return
+
+    split_outputs: List[str] = []
+    if state["split_mb"]:
+        console.print(f"[cyan]Splitting into {state['split_mb']} MB chunks...[/cyan]")
+        try:
+            split_outputs = split_pdf(output_path, max_mb=state["split_mb"], verbose=state["verbose"])
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+        except Exception as exc:
+            console.print(f"[red]Split failed:[/red] {exc}")
+
+    original = stats["original_size"]
+    compressed = stats["compressed_size"]
+    reduction = (1 - compressed / original) * 100 if original else 0.0
+
+    table = Table(title="Done", show_header=True, header_style="bold")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Original", human_size(original))
+    table.add_row("Compressed", human_size(compressed))
+    table.add_row("Reduction", f"{reduction:.1f}%")
+    table.add_row("Pages", str(stats["pages"]))
+    table.add_row("Images", f"{stats['replaced_images']}/{stats['total_images']}")
+    table.add_row("Elapsed", f"{stats['elapsed']:.1f}s")
+    console.print(table)
+
+    if split_outputs:
+        console.print("[bold green]Split files:[/bold green]")
+        for p in split_outputs:
+            console.print(f"  - {p}  ({human_size(os.path.getsize(p))})")
+    else:
+        console.print(f"[bold green]→[/bold green] {output_path}")
+
+
+# Dispatch table: maps slash-command name to a handler(state, arg_str) -> bool
+# Returning True from a handler means "exit the REPL".
+
+
+def _cmd_help(state: dict, arg: str) -> bool:
+    _print_help()
+    return False
+
+
+def _cmd_status(state: dict, arg: str) -> bool:
+    _print_status(state)
+    return False
+
+
+def _cmd_preset(state: dict, arg: str) -> bool:
+    a = arg.strip().lower()
+    if a not in ("low", "medium", "high"):
+        console.print("[red]Usage:[/red] /preset <low|medium|high>")
+        return False
+    state["preset"] = a
+    console.print(f"[green]preset → {a}[/green]")
+    return False
+
+
+def _cmd_target(state: dict, arg: str) -> bool:
+    a = arg.strip().lower()
+    if a in ("off", "none", "clear", ""):
+        state["target_size"] = None
+        console.print("[green]target size cleared[/green]")
+        return False
+    try:
+        n = int(a)
+        if n <= 0:
+            raise ValueError
+    except ValueError:
+        console.print("[red]Usage:[/red] /target <positive integer MB> | off")
+        return False
+    state["target_size"] = n
+    console.print(f"[green]target size → {n} MB[/green]")
+    return False
+
+
+def _cmd_dpi(state: dict, arg: str) -> bool:
+    a = arg.strip().lower()
+    if a in ("off", "none", "clear", ""):
+        state["dpi"] = None
+        console.print("[green]dpi override cleared[/green]")
+        return False
+    try:
+        n = int(a)
+        if n <= 0:
+            raise ValueError
+    except ValueError:
+        console.print("[red]Usage:[/red] /dpi <positive integer> | off")
+        return False
+    state["dpi"] = n
+    console.print(f"[green]dpi → {n}[/green]")
+    return False
+
+
+def _cmd_pages(state: dict, arg: str) -> bool:
+    a = arg.strip()
+    if a.lower() in ("all", "off", "none", "clear", ""):
+        state["pages"] = None
+        console.print("[green]pages → all[/green]")
+        return False
+    state["pages"] = a
+    console.print(f"[green]pages → {a}[/green]")
+    return False
+
+
+def _cmd_split(state: dict, arg: str) -> bool:
+    a = arg.strip().lower()
+    if a in ("off", "none", "clear", ""):
+        state["split_mb"] = None
+        console.print("[green]split cleared[/green]")
+        return False
+    try:
+        n = int(a)
+        if n <= 0:
+            raise ValueError
+    except ValueError:
+        console.print("[red]Usage:[/red] /split <positive integer MB> | off")
+        return False
+    state["split_mb"] = n
+    console.print(f"[green]split → {n} MB[/green]")
+    return False
+
+
+def _cmd_ocr(state: dict, arg: str) -> bool:
+    v = _parse_on_off(arg) if arg.strip() else (not state["ocr"])
+    if v is None:
+        console.print("[red]Usage:[/red] /ocr on|off")
+        return False
+    state["ocr"] = v
+    console.print(f"[green]ocr → {'on' if v else 'off'}[/green]")
+    return False
+
+
+def _cmd_verbose(state: dict, arg: str) -> bool:
+    v = _parse_on_off(arg) if arg.strip() else (not state["verbose"])
+    if v is None:
+        console.print("[red]Usage:[/red] /verbose on|off")
+        return False
+    state["verbose"] = v
+    console.print(f"[green]verbose → {'on' if v else 'off'}[/green]")
+    return False
+
+
+def _cmd_output(state: dict, arg: str) -> bool:
+    a = arg.strip()
+    if a.lower() in ("default", "auto", "off", "clear", ""):
+        state["output_path"] = None
+        console.print("[green]output → auto[/green]")
+        return False
+    state["output_path"] = _resolve_path(a)
+    console.print(f"[green]output → {state['output_path']}[/green]")
+    return False
+
+
+def _cmd_compress(state: dict, arg: str) -> bool:
+    path = _resolve_path(arg)
+    if not path:
+        console.print("[red]Usage:[/red] /compress <path-to-pdf>")
+        return False
+    _run_compression_with_state(state, path)
+    return False
+
+
+def _cmd_reset(state: dict, arg: str) -> bool:
+    state.clear()
+    state.update(_default_state())
+    console.print("[green]settings reset to defaults[/green]")
+    return False
+
+
+def _cmd_clear(state: dict, arg: str) -> bool:
+    console.clear()
+    return False
+
+
+def _cmd_exit(state: dict, arg: str) -> bool:
+    console.print("[cyan]bye[/cyan]")
+    return True
+
+
+COMMANDS = {
+    "help": _cmd_help,
+    "?": _cmd_help,
+    "status": _cmd_status,
+    "show": _cmd_status,
+    "preset": _cmd_preset,
+    "target": _cmd_target,
+    "dpi": _cmd_dpi,
+    "pages": _cmd_pages,
+    "split": _cmd_split,
+    "ocr": _cmd_ocr,
+    "verbose": _cmd_verbose,
+    "output": _cmd_output,
+    "compress": _cmd_compress,
+    "reset": _cmd_reset,
+    "clear": _cmd_clear,
+    "cls": _cmd_clear,
+    "exit": _cmd_exit,
+    "quit": _cmd_exit,
+    "q": _cmd_exit,
+}
+
+
+def _handle_line(state: dict, line: str) -> bool:
+    """Parse one line of input. Returns True if REPL should exit."""
+    line = line.strip()
+    if not line:
+        return False
+
+    # Bare 'q' / 'quit' / 'exit' without slash
+    if line.lower() in ("q", "quit", "exit"):
+        return _cmd_exit(state, "")
+
+    # Slash command
+    if line.startswith("/"):
+        body = line[1:]
+        name, _, arg = body.partition(" ")
+        name = name.lower()
+        handler = COMMANDS.get(name)
+        if handler is None:
+            console.print(
+                f"[red]Unknown command:[/red] /{name}   "
+                "[dim](type /help)[/dim]"
+            )
+            return False
+        return handler(state, arg)
+
+    # Otherwise treat the whole line as a path and run compression
+    return _cmd_compress(state, line)
+
+
+def run_repl(initial_input: Optional[str] = None) -> None:
+    """Main REPL loop. claudekit-style slash-command shell.
+
+    Optional `initial_input` is a path pre-supplied via `-i`; if given we
+    show it in status but do not auto-compress — the user must type
+    `/compress` (or just hit Enter on the path) to run.
+    """
+    # Try to enable line editing / history on macOS + Linux
+    try:
+        import readline  # noqa: F401  (side-effect import)
+    except Exception:
+        pass
+
+    state = _default_state()
+
+    console.print(REPL_BANNER, style="cyan", highlight=False)
+    console.print(
+        "[dim]Interactive shell. Type [/dim][cyan]/help[/cyan][dim] for commands, "
+        "[/dim][cyan]/exit[/cyan][dim] to quit. "
+        "Drop a PDF path to compress with current settings.[/dim]\n"
+    )
+
+    if initial_input:
+        resolved = _resolve_path(initial_input)
+        if os.path.exists(resolved):
+            console.print(
+                f"[dim]Pre-loaded input:[/dim] [green]{resolved}[/green]  "
+                f"[dim](type /compress to run, or change settings first)[/dim]\n"
+            )
+            # Remember for quick-run: bare Enter will use this
+            state["_last_input"] = resolved
+
+    while True:
+        try:
+            line = input("\x1b[36mpdf-compressor›\x1b[0m ")
+        except EOFError:
+            # Ctrl+D
+            console.print()
+            console.print("[cyan]bye[/cyan]")
+            return
+        except KeyboardInterrupt:
+            # Ctrl+C at prompt: cancel line, stay in shell
+            console.print("\n[dim](Ctrl+C pressed — type /exit to quit)[/dim]")
+            continue
+
+        # Shortcut: blank line re-runs on last input path if one exists
+        if not line.strip() and state.get("_last_input"):
+            _run_compression_with_state(state, state["_last_input"])
+            continue
+
+        should_exit = _handle_line(state, line)
+
+        # Remember last compressed path for blank-line re-run
+        stripped = line.strip()
+        if stripped and not stripped.startswith("/"):
+            state["_last_input"] = _resolve_path(stripped)
+        elif stripped.lower().startswith("/compress "):
+            state["_last_input"] = _resolve_path(stripped[len("/compress "):])
+
+        if should_exit:
+            return
+
+
 # ---------- CLI ----------
 
 
@@ -730,7 +1185,7 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
     required=False,
     default=None,
     type=click.Path(exists=True, dir_okay=False, readable=True),
-    help="Input PDF file. Omit to enter interactive mode.",
+    help="Input PDF file. Omit to enter the interactive shell.",
 )
 @click.option(
     "-I",
@@ -738,7 +1193,14 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
     "interactive",
     is_flag=True,
     default=False,
-    help="Force interactive prompt mode (ask for each option).",
+    help="Force interactive shell (claudekit-style REPL).",
+)
+@click.option(
+    "--wizard",
+    "wizard",
+    is_flag=True,
+    default=False,
+    help="One-shot step-by-step wizard (asks each option then exits).",
 )
 @click.option(
     "-o",
@@ -797,6 +1259,7 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
 def main(
     input_path: Optional[str],
     interactive: bool,
+    wizard: bool,
     output_path: Optional[str],
     quality: str,
     target_size: Optional[int],
@@ -807,8 +1270,11 @@ def main(
     verbose: bool,
 ) -> None:
     """Entry point."""
-    # Trigger interactive mode when no input file is given or -I is passed
-    if interactive or input_path is None:
+    # Mode selection:
+    #   --wizard         → one-shot step-by-step prompts, then exit
+    #   -I / no -i flag  → claudekit-style REPL shell (default)
+    #   -i <file>        → direct flag mode
+    if wizard:
         answers = run_interactive(prefill={"input_path": input_path})
         input_path = answers["input_path"]
         output_path = answers["output_path"]
@@ -819,6 +1285,9 @@ def main(
         split_mb = answers["split_mb"]
         ocr = answers["ocr"]
         verbose = answers["verbose"]
+    elif interactive or input_path is None:
+        run_repl(initial_input=input_path)
+        return
 
     in_path = Path(input_path)
     if output_path is None:
