@@ -5,13 +5,17 @@ A Python command-line tool that **compresses large PDF files (1GB+)** down to a 
 It processes PDFs page-by-page, so it **never loads the whole file into RAM** — well-suited for scanned documents and files packed with high-quality images.
 
 ```bash
-# Fastest install (recommended) — works on macOS, Linux, Windows:
+# One-shot Homebrew install (macOS) — taps this repo and installs:
+curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
+
+# Or, cross-platform (macOS/Linux/Windows) via pipx:
 pipx install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
 
-pdf-compressor /path/to/big.pdf      # done — no source clone needed
+# Then just:
+pdf-compressor /path/to/big.pdf
 ```
 
-> Prefer Homebrew? See the [Homebrew tap option](#option-2-homebrew-tap) below.
+> `brew install pdf-compressor-cli` alone does **not** work — Homebrew only searches its default registry (`homebrew-core`). You need to tap this repo first (the one-shot installer above does it for you). See [Option 2](#option-2-homebrew-tap) for manual steps.
 
 ---
 
@@ -61,27 +65,33 @@ For OCR support: `brew install tesseract`.
 
 ### Option 2: Homebrew tap
 
-You need to `brew tap` this repo first (Homebrew doesn't auto-discover formulas from arbitrary repos):
+The **one-shot installer** does tap + install in a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
+```
+
+Or do the two steps manually:
 
 ```bash
 brew tap repo-phuocdt/pdf-compressor-cli https://github.com/repo-phuocdt/pdf-compressor-cli.git
-brew install pdf-compressor
+brew install pdf-compressor-cli
 ```
 
-> **Why `brew install pdf-compressor` alone doesn't work**: Homebrew only searches `homebrew-core` by default. You must either `brew tap` first, or install directly from the formula URL:
+> **Why `brew install pdf-compressor-cli` alone fails** with `No available formula`: Homebrew only searches `homebrew-core` by default, and this tool lives in a personal repo. You must tap first. Alternative direct install without tapping:
 >
 > ```bash
 > brew install --build-from-source \
->   https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/Formula/pdf-compressor.rb
+>   https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/Formula/pdf-compressor-cli.rb
 > ```
 
-To always track the latest master (no pinned version):
+To always track the latest master commit instead of the pinned version:
 
 ```bash
-brew install --HEAD pdf-compressor
+brew install --HEAD pdf-compressor-cli
 ```
 
-The formula also pulls in `tesseract` (as a recommended dep) so `--ocr` works out of the box.
+The formula pulls in `tesseract` (as a recommended dep) so `--ocr` works out of the box.
 
 ### Option 3: pip (global install)
 
@@ -283,22 +293,23 @@ pdf-compressor big.pdf -v
 
 ```
 pdf-compressor/
-├── compress_pdf.py         # Main CLI (single, self-contained file)
-├── pyproject.toml          # Package metadata + `pdf-compressor` entry point
-├── requirements.txt        # Python dependencies (used by setup.sh)
-├── setup.sh                # Dev setup script for macOS
+├── compress_pdf.py             # Main CLI (single, self-contained file)
+├── pyproject.toml              # Package metadata + `pdf-compressor` entry point
+├── requirements.txt            # Python dependencies (used by setup.sh)
+├── setup.sh                    # Dev setup script for macOS
+├── install.sh                  # One-shot brew tap + install script
 ├── Formula/
-│   └── pdf-compressor.rb   # Homebrew formula
+│   └── pdf-compressor-cli.rb   # Homebrew formula
 ├── scripts/
-│   └── gen_formula.py      # Regenerate formula resources from PyPI
-└── README.md               # This file
+│   └── gen_formula.py          # Regenerate formula resources from PyPI
+└── README.md                   # This file
 ```
 
 ---
 
 ## Publishing to Homebrew (for maintainers)
 
-To let others run `brew install pdf-compressor`, you need a dedicated **tap repo** on GitHub:
+End-users get the tool by tapping this repo and installing the formula that lives here. The one-shot `install.sh` script does both steps for them. When you cut a new release:
 
 ### 1. Tag a release on the main repo
 
@@ -325,23 +336,23 @@ python scripts/gen_formula.py \
     --source-sha256 <sha256-from-step-2>
 ```
 
-### 4. Create the tap repo
-
-The repo must be named `homebrew-<tap-name>` — here, `homebrew-pdf-compressor-cli`:
+### 4. Commit + push the updated formula
 
 ```bash
-# On GitHub: create the repo `homebrew-pdf-compressor-cli`
-git clone https://github.com/repo-phuocdt/homebrew-pdf-compressor-cli.git
-cp Formula/pdf-compressor.rb homebrew-pdf-compressor-cli/Formula/
-cd homebrew-pdf-compressor-cli
-git add . && git commit -m "Initial formula" && git push
+git add Formula/pdf-compressor-cli.rb
+git commit -m "Bump formula to v0.1.0"
+git push
 ```
 
 ### 5. End-user install
 
 ```bash
-brew tap repo-phuocdt/pdf-compressor-cli
-brew install pdf-compressor
+# One-shot:
+curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
+
+# Or manual:
+brew tap repo-phuocdt/pdf-compressor-cli https://github.com/repo-phuocdt/pdf-compressor-cli.git
+brew install pdf-compressor-cli
 ```
 
-> **Tip**: test locally before pushing with `brew install --build-from-source ./Formula/pdf-compressor.rb`.
+> **Tip**: test locally before pushing with `brew install --build-from-source ./Formula/pdf-compressor-cli.rb`.
