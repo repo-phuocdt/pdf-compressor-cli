@@ -36,6 +36,7 @@ dependencies = [
 
 [project.scripts]
 pdf-compressor = "compress_pdf:main"
+pdf-compressor-cli = "compress_pdf:main"
 pdf-compress = "compress_pdf:main"
 
 [project.urls]
