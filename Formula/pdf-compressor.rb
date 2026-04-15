@@ -3,9 +3,11 @@ class PdfCompressor < Formula
 
   desc "Compress large PDFs to an AI-friendly size (page-by-page, memory efficient)"
   homepage "https://github.com/repo-phuocdt/pdf-compressor-cli"
-  url "https://github.com/repo-phuocdt/pdf-compressor-cli/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"
+  url "https://github.com/repo-phuocdt/pdf-compressor-cli/archive/51789a14e07bef71470c20d45640b71165031d14.tar.gz"
+  version "0.1.0"
+  sha256 "757758f40979dbbb2f27bea8e26b483913266d9cf5f067ed994f782304701903"
   license "MIT"
+  head "https://github.com/repo-phuocdt/pdf-compressor-cli.git", branch: "master"
 
   depends_on "python@3.12"
   depends_on "tesseract" => :recommended # needed only for --ocr
