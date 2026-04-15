@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gen_formula.py - Regenerate the Homebrew formula at Formula/pdf-compressor.rb.
+gen_formula.py - Regenerate the Homebrew formula at Formula/pdf-compressor-cli.rb.
 
 Pulls the project's declared Python dependencies from pyproject.toml, resolves
 the exact installed versions in the current environment, fetches each sdist's
@@ -78,7 +78,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--out",
-        default=str(Path(__file__).resolve().parent.parent / "Formula" / "pdf-compressor.rb"),
+        default=str(Path(__file__).resolve().parent.parent / "Formula" / "pdf-compressor-cli.rb"),
         help="Output path for the formula.",
     )
     args = ap.parse_args()
@@ -91,7 +91,7 @@ def main() -> int:
         print(f"  {canonical}=={ver}")
         resources.append(fmt_resource(canonical, url, sha))
 
-    formula = f"""class PdfCompressor < Formula
+    formula = f"""class PdfCompressorCli < Formula
   include Language::Python::Virtualenv
 
   desc "Compress large PDFs to an AI-friendly size (page-by-page, memory efficient)"
