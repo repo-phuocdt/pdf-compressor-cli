@@ -8,6 +8,7 @@ Tool xử lý PDF theo từng page (page-by-page) nên **không load toàn bộ 
 
 ## Tính năng
 
+- **Interactive mode**: chạy không có argument → hỏi từng option theo kiểu wizard (giống Claude Code)
 - Nén ảnh trong PDF (giảm DPI + re-encode JPEG) theo 3 preset: `low` / `medium` / `high`
 - Tự động binary search quality để đạt **target size** theo MB
 - Chọn **page range** (ví dụ `1-50` hoặc `1,3,5-10`)
@@ -53,6 +54,36 @@ python compress_pdf.py --help
 ---
 
 ## Sử dụng nhanh
+
+### Interactive mode (khuyến nghị cho người mới)
+
+Chạy không có argument hoặc với `-I`, tool sẽ hỏi từng option một:
+
+```bash
+python compress_pdf.py
+# hoặc
+python compress_pdf.py -I
+```
+
+Tool sẽ lần lượt hỏi:
+
+1. **Input PDF path** — đường dẫn file PDF (hỗ trợ `~`, env vars, kéo-thả)
+2. **Output path** — mặc định `{name}_compressed.pdf`
+3. **Quality preset** — `low` / `medium` / `high`
+4. **Target size (MB)?** — y/n, nếu có thì nhập số MB
+5. **Override DPI?** — y/n, nếu có thì nhập DPI tùy chỉnh
+6. **Page range?** — y/n, nếu có thì nhập `"1-50"` / `"1,3,5-10"`
+7. **Split output?** — y/n, nếu có thì nhập MB mỗi chunk
+8. **OCR?** — y/n
+9. **Verbose?** — y/n
+
+Sau đó hiển thị bảng tóm tắt và hỏi **Proceed?** để xác nhận. Có thể Ctrl+C để hủy bất cứ lúc nào.
+
+> Tip: nếu đã biết input file, chạy `python compress_pdf.py -i big.pdf -I` để tool skip câu hỏi đầu và hỏi các option còn lại.
+
+---
+
+### Flag mode (cho power user / script)
 
 ### 1. Nén cơ bản với preset `medium` (mặc định)
 
@@ -111,7 +142,8 @@ python compress_pdf.py -i big.pdf -v
 
 | Flag | Mô tả |
 | --- | --- |
-| `-i, --input FILE` | **Bắt buộc.** File PDF đầu vào |
+| `-i, --input FILE` | File PDF đầu vào. Nếu bỏ qua sẽ tự vào interactive mode |
+| `-I, --interactive` | Bắt buộc vào interactive mode (hỏi từng option) |
 | `-o, --output FILE` | File đầu ra (mặc định: `{name}_compressed.pdf`) |
 | `-q, --quality TEXT` | Preset: `low` \| `medium` \| `high` (mặc định: `medium`) |
 | `-t, --target-size INT` | Target size (MB). Tự binary-search quality |

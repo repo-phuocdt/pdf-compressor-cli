@@ -32,6 +32,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
 # Optional OCR dependency
@@ -559,20 +560,185 @@ def split_pdf(input_path: str, max_mb: int, verbose: bool = False) -> List[str]:
         src.close()
 
 
+# ---------- Interactive mode ----------
+
+
+def _prompt_input_path() -> str:
+    """Prompt for a PDF path until a valid, existing file is given."""
+    while True:
+        raw = Prompt.ask("[bold cyan]?[/bold cyan] Input PDF path")
+        raw = raw.strip().strip('"').strip("'")
+        # Expand ~ and env vars
+        path = os.path.expanduser(os.path.expandvars(raw))
+        if not path:
+            console.print("[red]Path cannot be empty.[/red]")
+            continue
+        if not os.path.exists(path):
+            console.print(f"[red]File not found: {path}[/red]")
+            continue
+        if os.path.isdir(path):
+            console.print(f"[red]Path is a directory, not a file: {path}[/red]")
+            continue
+        if not path.lower().endswith(".pdf"):
+            if not Confirm.ask(
+                f"[yellow]File does not end in .pdf: {path}. Continue anyway?[/yellow]",
+                default=False,
+            ):
+                continue
+        return path
+
+
+def run_interactive(prefill: Optional[dict] = None) -> dict:
+    """Walk the user through each option with prompts. Returns a dict of args
+    matching the main() parameter names. Any keys supplied in `prefill` are
+    reused as defaults (or skipped entirely for the input path)."""
+    prefill = prefill or {}
+    console.print()
+    console.rule("[bold cyan]PDF Compressor — Interactive Mode[/bold cyan]")
+    console.print(
+        "[dim]Press Enter to accept defaults in [brackets]. Ctrl+C to cancel.[/dim]\n"
+    )
+
+    # 1. Input — skip prompt if already supplied and valid
+    pre_input = prefill.get("input_path")
+    if pre_input and os.path.exists(pre_input):
+        input_path = pre_input
+        console.print(f"[bold cyan]?[/bold cyan] Input PDF path: [green]{input_path}[/green]")
+    else:
+        input_path = _prompt_input_path()
+    try:
+        size = os.path.getsize(input_path)
+        console.print(f"  [dim]size: {human_size(size)}[/dim]")
+    except OSError:
+        pass
+
+    # 2. Output
+    default_out = str(Path(input_path).with_name(f"{Path(input_path).stem}_compressed.pdf"))
+    output_path = Prompt.ask(
+        "[bold cyan]?[/bold cyan] Output path", default=default_out
+    ).strip()
+
+    # 3. Quality preset
+    quality = Prompt.ask(
+        "[bold cyan]?[/bold cyan] Quality preset",
+        choices=["low", "medium", "high"],
+        default="medium",
+    )
+
+    # 4. Target size (optional)
+    target_size: Optional[int] = None
+    if Confirm.ask(
+        "[bold cyan]?[/bold cyan] Set a target output size (MB)?", default=False
+    ):
+        target_size = IntPrompt.ask(
+            "    Target size in MB", default=25
+        )
+        if target_size <= 0:
+            console.print("[yellow]  Ignoring non-positive target size.[/yellow]")
+            target_size = None
+
+    # 5. Custom DPI (optional, only if not using target-size)
+    custom_dpi: Optional[int] = None
+    if Confirm.ask(
+        "[bold cyan]?[/bold cyan] Override the preset DPI?", default=False
+    ):
+        preset_default = QUALITY_PRESETS[quality][0]
+        custom_dpi = IntPrompt.ask("    DPI", default=preset_default)
+        if custom_dpi <= 0:
+            console.print("[yellow]  Ignoring non-positive DPI.[/yellow]")
+            custom_dpi = None
+
+    # 6. Page range (optional)
+    pages: Optional[str] = None
+    if Confirm.ask(
+        "[bold cyan]?[/bold cyan] Only process certain pages?", default=False
+    ):
+        pages = Prompt.ask(
+            "    Page range (e.g. '1-50' or '1,3,5-10')"
+        ).strip() or None
+
+    # 7. Split (optional)
+    split_mb: Optional[int] = None
+    if Confirm.ask(
+        "[bold cyan]?[/bold cyan] Split output into multiple files?", default=False
+    ):
+        split_mb = IntPrompt.ask("    Max size per part (MB)", default=30)
+        if split_mb <= 0:
+            console.print("[yellow]  Ignoring non-positive split size.[/yellow]")
+            split_mb = None
+
+    # 8. OCR
+    ocr_default = False
+    ocr = Confirm.ask(
+        "[bold cyan]?[/bold cyan] Run OCR on scanned pages?", default=ocr_default
+    )
+    if ocr and not HAS_TESSERACT:
+        console.print(
+            "[yellow]  Note: pytesseract not installed; OCR will be skipped.[/yellow]"
+        )
+
+    # 9. Verbose
+    verbose = Confirm.ask("[bold cyan]?[/bold cyan] Verbose output?", default=False)
+
+    # Confirmation summary
+    console.print()
+    summary = Table(title="Ready to run with:", show_header=False)
+    summary.add_column(style="cyan")
+    summary.add_column(style="green")
+    summary.add_row("Input", input_path)
+    summary.add_row("Output", output_path)
+    summary.add_row("Quality", quality)
+    summary.add_row("Target size", f"{target_size} MB" if target_size else "—")
+    summary.add_row("DPI", str(custom_dpi) if custom_dpi else f"preset ({QUALITY_PRESETS[quality][0]})")
+    summary.add_row("Pages", pages or "all")
+    summary.add_row("Split", f"{split_mb} MB" if split_mb else "—")
+    summary.add_row("OCR", "yes" if ocr else "no")
+    summary.add_row("Verbose", "yes" if verbose else "no")
+    console.print(summary)
+
+    if not Confirm.ask("[bold cyan]?[/bold cyan] Proceed?", default=True):
+        console.print("[yellow]Cancelled.[/yellow]")
+        sys.exit(0)
+
+    return {
+        "input_path": input_path,
+        "output_path": output_path,
+        "quality": quality,
+        "target_size": target_size,
+        "dpi": custom_dpi,
+        "pages": pages,
+        "split_mb": split_mb,
+        "ocr": ocr,
+        "verbose": verbose,
+    }
+
+
 # ---------- CLI ----------
 
 
 @click.command(
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Compress large PDF files down to an AI-friendly size.",
+    help=(
+        "Compress large PDF files down to an AI-friendly size. "
+        "Run with no arguments (or -I) for interactive mode."
+    ),
 )
 @click.option(
     "-i",
     "--input",
     "input_path",
-    required=True,
+    required=False,
+    default=None,
     type=click.Path(exists=True, dir_okay=False, readable=True),
-    help="Input PDF file (required).",
+    help="Input PDF file. Omit to enter interactive mode.",
+)
+@click.option(
+    "-I",
+    "--interactive",
+    "interactive",
+    is_flag=True,
+    default=False,
+    help="Force interactive prompt mode (ask for each option).",
 )
 @click.option(
     "-o",
@@ -629,7 +795,8 @@ def split_pdf(input_path: str, max_mb: int, verbose: bool = False) -> List[str]:
     help="Verbose logging.",
 )
 def main(
-    input_path: str,
+    input_path: Optional[str],
+    interactive: bool,
     output_path: Optional[str],
     quality: str,
     target_size: Optional[int],
@@ -640,6 +807,19 @@ def main(
     verbose: bool,
 ) -> None:
     """Entry point."""
+    # Trigger interactive mode when no input file is given or -I is passed
+    if interactive or input_path is None:
+        answers = run_interactive(prefill={"input_path": input_path})
+        input_path = answers["input_path"]
+        output_path = answers["output_path"]
+        quality = answers["quality"]
+        target_size = answers["target_size"]
+        dpi = answers["dpi"]
+        pages = answers["pages"]
+        split_mb = answers["split_mb"]
+        ocr = answers["ocr"]
+        verbose = answers["verbose"]
+
     in_path = Path(input_path)
     if output_path is None:
         output_path = str(in_path.with_name(f"{in_path.stem}_compressed.pdf"))
