@@ -4,6 +4,13 @@ Công cụ dòng lệnh (CLI) bằng Python giúp **nén file PDF nặng (1GB+)*
 
 Tool xử lý PDF theo từng page (page-by-page) nên **không load toàn bộ file vào RAM**, phù hợp với file scan/nhiều hình ảnh chất lượng cao.
 
+```bash
+brew tap YOUR_USER/pdf-compressor
+brew install pdf-compressor
+
+pdf-compressor /path/to/big.pdf      # xong, không cần clone source
+```
+
 ---
 
 ## Tính năng
@@ -32,25 +39,52 @@ Tool xử lý PDF theo từng page (page-by-page) nên **không load toàn bộ 
 
 ## Cài đặt
 
+Sau khi cài xong, gõ `pdf-compressor <file>` ở bất kỳ terminal nào là chạy luôn — **không cần clone source, không cần activate venv**.
+
+### Cách 1: Homebrew (khuyến nghị cho macOS)
+
 ```bash
+brew tap YOUR_USER/pdf-compressor
+brew install pdf-compressor
+```
+
+Sau khi cài, tool có sẵn trong `$PATH`:
+
+```bash
+pdf-compressor big.pdf                   # nén với preset medium
+pdf-compressor big.pdf -q low -t 25      # preset low, target 25 MB
+pdf-compressor                           # mở interactive shell
+```
+
+> Để chạy `--ocr`, brew cũng cài luôn `tesseract` (tự động qua `depends_on`).
+
+### Cách 2: pipx (one-command, không cần brew tap)
+
+```bash
+pipx install git+https://github.com/YOUR_USER/pdf-compressor.git
+```
+
+`pipx` tự tạo venv cô lập cho tool và expose command `pdf-compressor` ra `$PATH`.
+
+Nếu chưa có pipx: `brew install pipx && pipx ensurepath`. Để dùng OCR: `brew install tesseract`.
+
+### Cách 3: pip
+
+```bash
+pip install git+https://github.com/YOUR_USER/pdf-compressor.git
+```
+
+### Cách 4: Clone & run từ source (cho dev)
+
+```bash
+git clone https://github.com/YOUR_USER/pdf-compressor.git
 cd pdf-compressor
-chmod +x setup.sh
-./setup.sh
-```
-
-Script `setup.sh` sẽ tự động:
-
-1. Kiểm tra Homebrew — nếu thiếu sẽ báo lỗi và hướng dẫn cài từ https://brew.sh
-2. Kiểm tra & cài `tesseract` (cho OCR) qua Homebrew nếu chưa có
-3. Kiểm tra `python3`
-4. Tạo virtualenv `./venv` và cài các Python package trong `requirements.txt`
-
-Sau khi cài xong, kích hoạt venv trước khi dùng:
-
-```bash
+chmod +x setup.sh && ./setup.sh
 source venv/bin/activate
-python compress_pdf.py --help
+pdf-compressor --help
 ```
+
+`setup.sh` sẽ kiểm tra Homebrew, cài `tesseract`, tạo venv và `pip install -e .`.
 
 ---
 
@@ -61,11 +95,11 @@ python compress_pdf.py --help
 Chạy không kèm argument → tool mở một **shell tương tác** kiểu Claude Code: gõ slash command, state giữ lại giữa các lệnh, có thể nén nhiều file liên tiếp không cần thoát:
 
 ```bash
-python compress_pdf.py
+pdf-compressor
 # hoặc
-python compress_pdf.py -I
+pdf-compressor -I
 # hoặc pre-load sẵn file:
-python compress_pdf.py -i big.pdf -I
+pdf-compressor -i big.pdf -I
 ```
 
 Ví dụ một session:
@@ -112,7 +146,7 @@ pdf-compressor› /exit                      # thoát
 Nếu bạn chỉ cần chạy một lần và muốn tool hỏi từng option:
 
 ```bash
-python compress_pdf.py --wizard
+pdf-compressor --wizard
 ```
 
 Tool sẽ lần lượt hỏi input/output/quality/target/pages/split/OCR/verbose rồi hiển thị bảng xác nhận → chạy → exit.
@@ -124,7 +158,7 @@ Tool sẽ lần lượt hỏi input/output/quality/target/pages/split/OCR/verbos
 ### 1. Nén cơ bản với preset `medium` (mặc định)
 
 ```bash
-python compress_pdf.py -i big.pdf
+pdf-compressor -i big.pdf
 ```
 
 Output mặc định: `big_compressed.pdf` cùng thư mục.
@@ -132,13 +166,13 @@ Output mặc định: `big_compressed.pdf` cùng thư mục.
 ### 2. Nén với preset thấp (giảm mạnh, chất lượng thấp)
 
 ```bash
-python compress_pdf.py -i big.pdf -q low -o tiny.pdf
+pdf-compressor -i big.pdf -q low -o tiny.pdf
 ```
 
 ### 3. Nén để đạt đúng target size (ví dụ ~25 MB)
 
 ```bash
-python compress_pdf.py -i big.pdf -t 25
+pdf-compressor -i big.pdf -t 25
 ```
 
 Tool sẽ binary-search JPEG quality trong khoảng [10, 85] để file output có size gần target ±10%.
@@ -146,14 +180,14 @@ Tool sẽ binary-search JPEG quality trong khoảng [10, 85] để file output c
 ### 4. Chỉ xử lý một dải page
 
 ```bash
-python compress_pdf.py -i big.pdf --pages "1-50"
-python compress_pdf.py -i big.pdf --pages "1,3,5-10"
+pdf-compressor -i big.pdf --pages "1-50"
+pdf-compressor -i big.pdf --pages "1,3,5-10"
 ```
 
 ### 5. Split output thành nhiều file ≤ 30 MB
 
 ```bash
-python compress_pdf.py -i big.pdf --split 30
+pdf-compressor -i big.pdf --split 30
 ```
 
 Sẽ tạo `big_compressed_part1.pdf`, `big_compressed_part2.pdf`, …
@@ -161,7 +195,7 @@ Sẽ tạo `big_compressed_part1.pdf`, `big_compressed_part2.pdf`, …
 ### 6. OCR cho PDF scan
 
 ```bash
-python compress_pdf.py -i scanned.pdf --ocr
+pdf-compressor -i scanned.pdf --ocr
 ```
 
 Thêm text layer vô hình cho các page hiện không có text — giúp AI tool trích được nội dung.
@@ -169,7 +203,7 @@ Thêm text layer vô hình cho các page hiện không có text — giúp AI too
 ### 7. Chi tiết quá trình xử lý
 
 ```bash
-python compress_pdf.py -i big.pdf -v
+pdf-compressor -i big.pdf -v
 ```
 
 ---
@@ -230,8 +264,65 @@ python compress_pdf.py -i big.pdf -v
 
 ```
 pdf-compressor/
-├── compress_pdf.py     # CLI chính (single file, self-contained)
-├── requirements.txt    # Python dependencies
-├── setup.sh            # Script setup cho macOS
-└── README.md           # Tài liệu (file này)
+├── compress_pdf.py         # CLI chính (single file, self-contained)
+├── pyproject.toml          # Package metadata + entry point `pdf-compressor`
+├── requirements.txt        # Python dependencies (cho setup.sh)
+├── setup.sh                # Script setup dev cho macOS
+├── Formula/
+│   └── pdf-compressor.rb   # Homebrew formula
+├── scripts/
+│   └── gen_formula.py      # Regenerate formula resources từ PyPI
+└── README.md               # Tài liệu (file này)
 ```
+
+---
+
+## Publish lên Homebrew (cho maintainer)
+
+Để người khác có thể `brew install pdf-compressor`, cần một **tap repo** riêng trên GitHub:
+
+### 1. Tag một release trên repo chính
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub sẽ tạo tarball tại `https://github.com/YOUR_USER/pdf-compressor/archive/refs/tags/v0.1.0.tar.gz`.
+
+### 2. Tính sha256 của tarball
+
+```bash
+curl -sL https://github.com/YOUR_USER/pdf-compressor/archive/refs/tags/v0.1.0.tar.gz \
+    | shasum -a 256
+```
+
+### 3. Regenerate formula với resources mới nhất từ PyPI
+
+```bash
+pip install -e .       # cài đúng versions vào env hiện tại
+python scripts/gen_formula.py \
+    --source-url https://github.com/YOUR_USER/pdf-compressor/archive/refs/tags/v0.1.0.tar.gz \
+    --source-sha256 <sha256-từ-bước-2>
+```
+
+### 4. Tạo tap repo
+
+Repo phải đặt tên `homebrew-<tên-tap>`. Ví dụ `homebrew-pdf-compressor`:
+
+```bash
+# Trên GitHub: tạo repo `homebrew-pdf-compressor`
+git clone https://github.com/YOUR_USER/homebrew-pdf-compressor.git
+cp pdf-compressor/Formula/pdf-compressor.rb homebrew-pdf-compressor/Formula/
+cd homebrew-pdf-compressor
+git add . && git commit -m "Initial formula" && git push
+```
+
+### 5. User cài đặt
+
+```bash
+brew tap YOUR_USER/pdf-compressor
+brew install pdf-compressor
+```
+
+> **Tip**: Test local trước khi push: `brew install --build-from-source ./Formula/pdf-compressor.rb`

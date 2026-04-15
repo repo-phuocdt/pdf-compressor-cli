@@ -1171,21 +1171,34 @@ def run_repl(initial_input: Optional[str] = None) -> None:
 # ---------- CLI ----------
 
 
+__version__ = "0.1.0"
+
+
 @click.command(
     context_settings={"help_option_names": ["-h", "--help"]},
     help=(
-        "Compress large PDF files down to an AI-friendly size. "
-        "Run with no arguments (or -I) for interactive mode."
+        "Compress large PDF files down to an AI-friendly size.\n\n"
+        "Quick start:\n"
+        "  pdf-compressor big.pdf              # compress with default preset\n"
+        "  pdf-compressor big.pdf -q low -t 25 # low preset, target 25 MB\n"
+        "  pdf-compressor                      # no args -> interactive shell"
     ),
+)
+@click.version_option(version=__version__, prog_name="pdf-compressor")
+@click.argument(
+    "input_arg",
+    required=False,
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, readable=True),
 )
 @click.option(
     "-i",
     "--input",
-    "input_path",
+    "input_opt",
     required=False,
     default=None,
     type=click.Path(exists=True, dir_okay=False, readable=True),
-    help="Input PDF file. Omit to enter the interactive shell.",
+    help="Input PDF file (alternative to positional argument).",
 )
 @click.option(
     "-I",
@@ -1257,7 +1270,8 @@ def run_repl(initial_input: Optional[str] = None) -> None:
     help="Verbose logging.",
 )
 def main(
-    input_path: Optional[str],
+    input_arg: Optional[str],
+    input_opt: Optional[str],
     interactive: bool,
     wizard: bool,
     output_path: Optional[str],
@@ -1270,10 +1284,18 @@ def main(
     verbose: bool,
 ) -> None:
     """Entry point."""
+    # Merge positional and -i/--input: positional wins if both given
+    if input_arg and input_opt and input_arg != input_opt:
+        raise click.UsageError(
+            "Specify the input file either as a positional argument or "
+            "with -i/--input, not both with different values."
+        )
+    input_path: Optional[str] = input_arg or input_opt
+
     # Mode selection:
     #   --wizard         → one-shot step-by-step prompts, then exit
-    #   -I / no -i flag  → claudekit-style REPL shell (default)
-    #   -i <file>        → direct flag mode
+    #   -I / no input    → claudekit-style REPL shell (default)
+    #   file arg         → direct flag mode
     if wizard:
         answers = run_interactive(prefill={"input_path": input_path})
         input_path = answers["input_path"]

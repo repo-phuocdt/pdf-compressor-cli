@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-compressor"
+version = "0.1.0"
+description = "Compress large PDF files to an AI-friendly size (page-by-page, memory efficient)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "pdf-compressor contributors" },
+]
+keywords = ["pdf", "compress", "ocr", "claude", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "pymupdf>=1.23.0",
+    "Pillow>=10.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "pytesseract>=0.3.10",
+]
+
+[project.scripts]
+pdf-compressor = "compress_pdf:main"
+pdf-compress = "compress_pdf:main"
+
+[project.urls]
+Homepage = "https://github.com/repo-phuocdt/git-flow"
+Repository = "https://github.com/repo-phuocdt/git-flow"
+Issues = "https://github.com/repo-phuocdt/git-flow/issues"
+
+[tool.setuptools]
+py-modules = ["compress_pdf"]

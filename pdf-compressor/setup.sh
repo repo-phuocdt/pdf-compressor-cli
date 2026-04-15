@@ -52,13 +52,14 @@ source venv/bin/activate
 echo "==> Upgrading pip"
 pip install --upgrade pip >/dev/null
 
-echo "==> Installing Python dependencies"
-pip install -r requirements.txt
+echo "==> Installing pdf-compressor (editable)"
+pip install -e .
 
 echo ""
 echo "Setup complete."
 echo ""
 echo "To use the tool:"
 echo "    source venv/bin/activate"
-echo "    python compress_pdf.py --help"
+echo "    pdf-compressor --help"
+echo "    pdf-compressor /path/to/big.pdf"
 echo ""
