@@ -3,9 +3,9 @@ class PdfCompressorCli < Formula
 
   desc "Compress large PDFs to an AI-friendly size (page-by-page, memory efficient)"
   homepage "https://github.com/repo-phuocdt/pdf-compressor-cli"
-  url "https://github.com/repo-phuocdt/pdf-compressor-cli/archive/51789a14e07bef71470c20d45640b71165031d14.tar.gz"
+  url "https://github.com/repo-phuocdt/pdf-compressor-cli/archive/1b00da37fb9587fe5cd7b54101b8fc3504a91bda.tar.gz"
   version "0.1.0"
-  sha256 "757758f40979dbbb2f27bea8e26b483913266d9cf5f067ed994f782304701903"
+  sha256 "2f39f27fe3fac450a5858f0d48128a2b7a78190ceb997b7720630ff41669c672"
   license "MIT"
   head "https://github.com/repo-phuocdt/pdf-compressor-cli.git", branch: "master"
 
