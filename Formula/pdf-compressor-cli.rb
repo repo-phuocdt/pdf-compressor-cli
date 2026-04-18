@@ -54,6 +54,11 @@ class PdfCompressorCli < Formula
   end
 
   test do
-    assert_match "pdf-compressor, version", shell_output("#{bin}/pdf-compressor --version")
+    # The entry_points create three binaries — test all of them so a rename
+    # of any one is caught. `--version` exits 0 and prints the version, so
+    # this also acts as a quick smoke test for the installed environment.
+    %w[pdf-compressor pdf-compressor-cli pdf-compress].each do |bin_name|
+      assert_match "version", shell_output("#{bin}/#{bin_name} --version")
+    end
   end
 end
