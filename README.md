@@ -5,17 +5,14 @@ A Python command-line tool that **compresses large PDF files (1GB+)** down to a 
 It processes PDFs page-by-page, so it **never loads the whole file into RAM** — well-suited for scanned documents and files packed with high-quality images.
 
 ```bash
-# One-shot Homebrew install (macOS) — taps this repo and installs:
+# One-shot installer (macOS, Linux). Default backend is pipx (recommended):
 curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
 
-# Or, cross-platform (macOS/Linux/Windows) via pipx:
-pipx install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
-
 # Then just:
-pdf-compressor /path/to/big.pdf
+pdf-compressor-cli /path/to/big.pdf
 ```
 
-> `brew install pdf-compressor-cli` alone does **not** work — Homebrew only searches its default registry (`homebrew-core`). You need to tap this repo first (the one-shot installer above does it for you). See [Option 2](#option-2-homebrew-tap) for manual steps.
+> **Why not `brew install pdf-compressor-cli`?** Homebrew only searches its default registry (`homebrew-core`), and this tool lives in a personal repo. You have to tap first (`brew tap ...`). More importantly, the Homebrew formula builds PyMuPDF from source, which often fails on macOS without the right SDK. `pipx` uses prebuilt PyPI wheels and finishes in seconds — so the installer uses `pipx` by default. Force the Homebrew path with `METHOD=brew curl ... | bash` if you prefer it.
 
 ---
 
@@ -24,6 +21,8 @@ pdf-compressor /path/to/big.pdf
 - **Interactive shell**: run with no arguments to open a Claude Code–style REPL with slash commands (`/preset`, `/target`, `/compress`, …). State persists between commands, so you can compress many files in one session.
 - **Wizard mode** (`--wizard`): a one-shot step-by-step prompt that asks each option, then exits.
 - Compress embedded images (downscale DPI + re-encode as JPEG) via three presets: `low` / `medium` / `high`.
+- **`--rasterize` mode**: render each page as a JPEG at target DPI — drops vector/text content but is the most aggressive path. Ideal for AI vision which reads the page as an image anyway.
+- Smart DPI detection: uses each image's actual placement rectangle (via `page.get_image_info`) to compute effective rendered DPI, so embedded images that don't span the full page still get correctly downscaled.
 - Binary-search JPEG quality to hit a **target size** in MB.
 - Pick a **page range** such as `1-50` or `1,3,5-10`.
 - **Split** output into multiple smaller files by max size.
@@ -45,68 +44,55 @@ pdf-compressor /path/to/big.pdf
 
 ## Installation
 
-Once installed, just run `pdf-compressor <file>` from any terminal — **no source clone, no venv activation required**.
+Once installed, just run `pdf-compressor-cli <file>` from any terminal — **no source clone, no venv activation required**.
 
-### Option 1: pipx (fastest, works everywhere)
-
-```bash
-pipx install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
-```
-
-`pipx` creates an isolated venv for the tool and puts `pdf-compressor` on your `$PATH`. This is the **recommended quick path** — it works on macOS, Linux, and Windows with no extra setup.
-
-If you don't have pipx yet:
-
-```bash
-brew install pipx && pipx ensurepath
-```
-
-For OCR support: `brew install tesseract`.
-
-### Option 2: Homebrew tap
-
-The **one-shot installer** does tap + install in a single command:
+### Option 1: One-shot installer (recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
 ```
 
-Or do the two steps manually:
+The installer uses `pipx` under the hood (fast, reliable, uses prebuilt wheels). It bootstraps `pipx` via Homebrew or `pip --user` if missing, installs `tesseract` for OCR, and places `pdf-compressor-cli` on your `$PATH`.
+
+### Option 2: pipx (manual)
+
+```bash
+pipx install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
+```
+
+If you don't have pipx yet: `brew install pipx && pipx ensurepath`. For OCR: `brew install tesseract`.
+
+### Option 3: Homebrew tap (advanced)
+
+> Heads up: the Homebrew formula builds **PyMuPDF from source**, which requires the Xcode Command Line Tools and can take several minutes. If that fails on your machine, use Option 1 or 2 instead.
+
+```bash
+METHOD=brew curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
+```
+
+Or the two steps manually:
 
 ```bash
 brew tap repo-phuocdt/pdf-compressor-cli https://github.com/repo-phuocdt/pdf-compressor-cli.git
 brew install pdf-compressor-cli
 ```
 
-> **Why `brew install pdf-compressor-cli` alone fails** with `No available formula`: Homebrew only searches `homebrew-core` by default, and this tool lives in a personal repo. You must tap first. Alternative direct install without tapping:
->
-> ```bash
-> brew install --build-from-source \
->   https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/Formula/pdf-compressor-cli.rb
-> ```
+To always track the latest master commit: `brew install --HEAD pdf-compressor-cli`.
 
-To always track the latest master commit instead of the pinned version:
-
-```bash
-brew install --HEAD pdf-compressor-cli
-```
-
-The formula pulls in `tesseract` (as a recommended dep) so `--ocr` works out of the box.
-
-### Option 3: pip (global install)
+### Option 4: pip (global install)
 
 ```bash
 pip install git+https://github.com/repo-phuocdt/pdf-compressor-cli.git
 ```
 
-### Option 4: Clone and run from source (for development)
+### Option 5: Clone and run from source (for development)
 
 ```bash
 git clone https://github.com/repo-phuocdt/pdf-compressor-cli.git
 cd pdf-compressor-cli
 chmod +x setup.sh && ./setup.sh
 source venv/bin/activate
-pdf-compressor --help
+pdf-compressor-cli --help
 ```
 
 `setup.sh` checks for Homebrew, installs `tesseract`, creates a venv, and runs `pip install -e .`.
@@ -120,11 +106,11 @@ pdf-compressor --help
 Run with no arguments and the tool opens an **interactive shell** inspired by Claude Code: type slash commands, state persists between commands, and you can compress many files without exiting:
 
 ```bash
-pdf-compressor
+pdf-compressor-cli
 # or
-pdf-compressor -I
+pdf-compressor-cli -I
 # or pre-load a file:
-pdf-compressor -i big.pdf -I
+pdf-compressor-cli -i big.pdf -I
 ```
 
 Example session:
@@ -134,6 +120,7 @@ pdf-compressor› /help                      # list all commands
 pdf-compressor› /preset low                # change the preset
 pdf-compressor› /target 25                 # target output size = 25 MB
 pdf-compressor› /pages 1-50                # only the first 50 pages
+pdf-compressor› /rasterize on              # aggressive mode for scans
 pdf-compressor› /status                    # show current settings
 pdf-compressor› big.pdf                    # just paste a path → compress
 pdf-compressor› another.pdf                # next file, same settings
@@ -153,6 +140,7 @@ pdf-compressor› /exit                      # quit
 | `/pages <range> \| all` | Set page range (`"1-50"` / `"1,3,5-10"`) |
 | `/split <MB> \| off` | Split output into chunks |
 | `/ocr on\|off` | Toggle OCR (no argument = toggle) |
+| `/rasterize on\|off` | Aggressive: render each page as a JPEG |
 | `/verbose on\|off` | Toggle verbose logging |
 | `/output <path> \| default` | Set output path |
 | `/compress <path>` | Compress a file with current settings |
@@ -171,7 +159,7 @@ pdf-compressor› /exit                      # quit
 If you only need to run once and want the tool to ask for each option:
 
 ```bash
-pdf-compressor --wizard
+pdf-compressor-cli --wizard
 ```
 
 The tool asks for input/output/quality/target/pages/split/OCR/verbose in order, shows a confirmation table, then runs and exits.
@@ -183,9 +171,9 @@ The tool asks for input/output/quality/target/pages/split/OCR/verbose in order, 
 #### 1. Basic compression with the default `medium` preset
 
 ```bash
-pdf-compressor big.pdf
+pdf-compressor-cli big.pdf
 # or
-pdf-compressor -i big.pdf
+pdf-compressor-cli -i big.pdf
 ```
 
 Default output: `big_compressed.pdf` next to the input.
@@ -193,44 +181,52 @@ Default output: `big_compressed.pdf` next to the input.
 #### 2. Aggressive compression with the low preset
 
 ```bash
-pdf-compressor big.pdf -q low -o tiny.pdf
+pdf-compressor-cli big.pdf -q low -o tiny.pdf
 ```
 
-#### 3. Compress to a specific target size (e.g. ~25 MB)
+#### 3. Maximum compression — rasterize every page
 
 ```bash
-pdf-compressor big.pdf -t 25
+pdf-compressor-cli big.pdf -q low --rasterize
+```
+
+Drops vector/text content and renders each page as a JPEG at the target DPI. Best for scanned docs or when the output is only going to an AI vision model.
+
+#### 4. Compress to a specific target size (e.g. ~25 MB)
+
+```bash
+pdf-compressor-cli big.pdf -t 25
 ```
 
 The tool binary-searches JPEG quality in the range [10, 85] until the output is within ±10% of the target.
 
-#### 4. Process only a page range
+#### 5. Process only a page range
 
 ```bash
-pdf-compressor big.pdf --pages "1-50"
-pdf-compressor big.pdf --pages "1,3,5-10"
+pdf-compressor-cli big.pdf --pages "1-50"
+pdf-compressor-cli big.pdf --pages "1,3,5-10"
 ```
 
-#### 5. Split output into parts ≤ 30 MB each
+#### 6. Split output into parts ≤ 30 MB each
 
 ```bash
-pdf-compressor big.pdf --split 30
+pdf-compressor-cli big.pdf --split 30
 ```
 
 Produces `big_compressed_part1.pdf`, `big_compressed_part2.pdf`, …
 
-#### 6. OCR for scanned PDFs
+#### 7. OCR for scanned PDFs
 
 ```bash
-pdf-compressor scanned.pdf --ocr
+pdf-compressor-cli scanned.pdf --ocr
 ```
 
 Adds an invisible text layer to pages that currently have no text, so AI tools can extract the content.
 
-#### 7. Verbose output
+#### 8. Verbose output
 
 ```bash
-pdf-compressor big.pdf -v
+pdf-compressor-cli big.pdf -v
 ```
 
 ---
@@ -250,6 +246,7 @@ pdf-compressor big.pdf -v
 | `--pages TEXT` | Page range, e.g. `"1-50"` or `"1,3,5-10"` |
 | `--split INT` | Split output into chunks of at most N MB |
 | `--ocr` | Run OCR on scanned pages (requires `tesseract` + `pytesseract`) |
+| `--rasterize` | Render each page as a JPEG at target DPI (drops vector/text content; ideal for AI vision) |
 | `-v, --verbose` | Verbose logging |
 | `-V, --version` | Show version and exit |
 | `-h, --help` | Show help and exit |
@@ -285,7 +282,10 @@ pdf-compressor big.pdf -v
 → The venv isn't activated. Run `source venv/bin/activate` and try again.
 
 **The output file is still too large**
-→ Try `-q low` or combine it with `-t 20` to force a target size. For PDFs packed with vector art or heavy embedded fonts, splitting with `--split` can help.
+→ Try `-q low --rasterize` or combine `-t <MB>` to force a target size. For PDFs packed with vector art or heavy embedded fonts, splitting with `--split` can help.
+
+**`brew install pdf-compressor-cli` hangs or fails on PyMuPDF**
+→ The Homebrew formula compiles PyMuPDF from source. Switch to the pipx path (Option 1 or 2) which uses a prebuilt wheel and finishes in seconds.
 
 ---
 
@@ -297,7 +297,7 @@ pdf-compressor/
 ├── pyproject.toml              # Package metadata + `pdf-compressor` entry point
 ├── requirements.txt            # Python dependencies (used by setup.sh)
 ├── setup.sh                    # Dev setup script for macOS
-├── install.sh                  # One-shot brew tap + install script
+├── install.sh                  # One-shot pipx/brew install script
 ├── Formula/
 │   └── pdf-compressor-cli.rb   # Homebrew formula
 ├── scripts/
@@ -347,12 +347,11 @@ git push
 ### 5. End-user install
 
 ```bash
-# One-shot:
+# One-shot (pipx under the hood):
 curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
 
-# Or manual:
-brew tap repo-phuocdt/pdf-compressor-cli https://github.com/repo-phuocdt/pdf-compressor-cli.git
-brew install pdf-compressor-cli
+# Or force Homebrew:
+METHOD=brew curl -fsSL https://raw.githubusercontent.com/repo-phuocdt/pdf-compressor-cli/master/install.sh | bash
 ```
 
 > **Tip**: test locally before pushing with `brew install --build-from-source ./Formula/pdf-compressor-cli.rb`.
