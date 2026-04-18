@@ -45,11 +45,21 @@ except Exception:
 
 
 # Quality presets: (DPI, JPEG quality)
+# Values chosen so "high" stays visually indistinguishable from the original:
+# 300 DPI is print-grade, JPEG q=92 is near-lossless. "medium" still looks
+# clean on a screen; "low" is the aggressive mode for AI/text-only use.
 QUALITY_PRESETS = {
-    "low": (72, 30),
-    "medium": (150, 50),
-    "high": (200, 70),
+    "low": (110, 55),
+    "medium": (200, 78),
+    "high": (300, 92),
 }
+
+# Images smaller than this are left alone — re-encoding them usually makes
+# them bigger (JPEG headers) and only costs fidelity.
+MIN_IMAGE_BYTES_TO_RECOMPRESS = 8 * 1024
+# We only replace an image if the re-encoded version is meaningfully smaller.
+# A 5% shave isn't worth the generational loss on an already-compressed JPEG.
+MIN_REPLACE_SAVING_RATIO = 0.15
 
 # Track temp files for signal cleanup
 _TEMP_FILES: List[str] = []
@@ -139,30 +149,108 @@ def parse_page_range(spec: str, total_pages: int) -> List[int]:
 
 
 def _recompress_image_bytes(
-    img_bytes: bytes, target_dpi: int, jpeg_quality: int, src_dpi_hint: int = 300
+    img_bytes: bytes,
+    target_dpi: int,
+    jpeg_quality: int,
+    src_dpi: float,
+    had_alpha: bool = False,
 ) -> Optional[bytes]:
-    """Downscale + re-encode one image as JPEG. Returns new bytes or None on failure."""
+    """Downscale (only when needed) + re-encode one image. Returns new bytes
+    or None on failure / when no gain is possible.
+
+    `src_dpi` should be the *effective* rendered DPI — pixels per inch as the
+    image actually appears on the page, not just pixels / page-width. Callers
+    compute this from the placement rectangle (see compress_page).
+    """
     try:
         with Image.open(io.BytesIO(img_bytes)) as im:
-            # Convert anything with alpha or palette to RGB for JPEG
-            if im.mode in ("RGBA", "LA", "P"):
-                im = im.convert("RGB")
-            elif im.mode not in ("RGB", "L"):
-                im = im.convert("RGB")
+            src_format = (im.format or "").upper()
+            # Preserve alpha: if the image has transparency, re-encoding to
+            # JPEG would fill it with black. Keep those as PNG.
+            keep_alpha = had_alpha or im.mode in ("RGBA", "LA") or (
+                im.mode == "P" and "transparency" in im.info
+            )
 
-            # Scale down if source DPI seems higher than target DPI
-            if src_dpi_hint > target_dpi and src_dpi_hint > 0:
-                scale = target_dpi / float(src_dpi_hint)
-                if scale < 1.0:
-                    new_w = max(1, int(im.width * scale))
-                    new_h = max(1, int(im.height * scale))
+            if keep_alpha:
+                if im.mode != "RGBA":
+                    im = im.convert("RGBA")
+            else:
+                if im.mode not in ("RGB", "L"):
+                    im = im.convert("RGB")
+
+            # Only downscale when the source is noticeably above target DPI.
+            # The small 1.1x guardband avoids pointless resampling near the
+            # threshold, which just blurs the image for ~0% size gain.
+            if src_dpi > target_dpi * 1.1 and src_dpi > 0:
+                scale = target_dpi / float(src_dpi)
+                new_w = max(1, int(round(im.width * scale)))
+                new_h = max(1, int(round(im.height * scale)))
+                if new_w < im.width and new_h < im.height:
                     im = im.resize((new_w, new_h), Image.LANCZOS)
 
             out = io.BytesIO()
-            im.save(out, format="JPEG", quality=jpeg_quality, optimize=True)
+            if keep_alpha:
+                # Keep PNG for anything with transparency — lossless & small
+                # enough for UI/diagram assets that are usually <1MB anyway.
+                im.save(out, format="PNG", optimize=True)
+            elif src_format == "PNG" and im.mode == "L":
+                # 1-bit / grayscale line art: PNG almost always beats JPEG.
+                im.save(out, format="PNG", optimize=True)
+            else:
+                im.save(
+                    out,
+                    format="JPEG",
+                    quality=jpeg_quality,
+                    optimize=True,
+                    progressive=True,
+                    subsampling=0 if jpeg_quality >= 90 else 2,
+                )
             return out.getvalue()
     except Exception:
         return None
+
+
+def _effective_image_dpi(
+    page: "fitz.Page", xref: int, pixel_width: int, pixel_height: int
+) -> float:
+    """Compute the rendered DPI of an image given its on-page placement.
+
+    Uses `page.get_image_info` to find the image's bbox in PDF points (1pt =
+    1/72 inch). Falls back to the page-width heuristic if the placement info
+    isn't available. Returns the max of horizontal and vertical DPI so we
+    don't accidentally downscale an image whose aspect ratio differs from
+    the placement box.
+    """
+    try:
+        infos = page.get_image_info(xrefs=True)
+    except Exception:
+        infos = []
+
+    for info in infos:
+        if info.get("xref") != xref:
+            continue
+        bbox = info.get("bbox")
+        if not bbox:
+            continue
+        try:
+            x0, y0, x1, y1 = bbox
+            w_in = max(0.0, (x1 - x0)) / 72.0
+            h_in = max(0.0, (y1 - y0)) / 72.0
+            dpi_w = pixel_width / w_in if w_in > 0 else 0.0
+            dpi_h = pixel_height / h_in if h_in > 0 else 0.0
+            dpi = max(dpi_w, dpi_h)
+            if dpi > 0:
+                return dpi
+        except Exception:
+            continue
+
+    # Fallback: page-width heuristic (less accurate, over-estimates on small
+    # images but that just means we don't downscale — which is safe).
+    if page.rect.width > 0:
+        page_w_in = page.rect.width / 72.0
+        if page_w_in > 0 and pixel_width > 0:
+            return pixel_width / page_w_in
+    return 0.0
 
 
 def compress_page(
@@ -183,6 +271,7 @@ def compress_page(
 
     for info in images:
         xref = info[0]
+        smask = info[1] if len(info) > 1 else 0
         seen += 1
         try:
             extracted = doc.extract_image(xref)
@@ -192,23 +281,36 @@ def compress_page(
             continue
 
         orig_bytes = extracted["image"]
-        # Heuristic: guess source DPI by comparing pixel dims to page size at 72dpi
-        # We just pass a generous hint so rescale fires when image is obviously high-res.
-        src_dpi_hint = 300
-        try:
-            width = extracted.get("width", 0)
-            if width and page.rect.width > 0:
-                page_width_in = page.rect.width / 72.0
-                if page_width_in > 0:
-                    src_dpi_hint = int(width / page_width_in)
-        except Exception:
-            pass
+
+        # Skip small images — the JPEG header alone eats the savings, and
+        # icons / logos look awful after lossy re-encoding.
+        if len(orig_bytes) < MIN_IMAGE_BYTES_TO_RECOMPRESS:
+            continue
+
+        pixel_w = int(extracted.get("width", 0) or 0)
+        pixel_h = int(extracted.get("height", 0) or 0)
+        if pixel_w <= 0 or pixel_h <= 0:
+            continue
+
+        src_dpi = _effective_image_dpi(page, xref, pixel_w, pixel_h)
+        # If we couldn't figure out placement, be conservative: only re-encode
+        # (no downscale) by pretending src == target.
+        if src_dpi <= 0:
+            src_dpi = float(dpi)
 
         new_bytes = _recompress_image_bytes(
-            orig_bytes, target_dpi=dpi, jpeg_quality=jpeg_quality, src_dpi_hint=src_dpi_hint
+            orig_bytes,
+            target_dpi=dpi,
+            jpeg_quality=jpeg_quality,
+            src_dpi=src_dpi,
+            had_alpha=bool(smask),
         )
-        if not new_bytes or len(new_bytes) >= len(orig_bytes):
-            # No gain, keep original
+        if not new_bytes:
+            continue
+
+        # Only replace if the saving clears the threshold. Otherwise the
+        # image is already near-optimal and re-encoding just degrades it.
+        if len(new_bytes) >= int(len(orig_bytes) * (1.0 - MIN_REPLACE_SAVING_RATIO)):
             continue
 
         try:
@@ -286,7 +388,7 @@ def _run_ocr_on_scanned_pages(
     return ocr_count
 
 
-def compress_pdf(
+def rasterize_pdf(
     input_path: str,
     output_path: str,
     dpi: int,
@@ -295,7 +397,132 @@ def compress_pdf(
     do_ocr: bool = False,
     verbose: bool = False,
 ) -> dict:
+    """Render each page to a single JPEG and rebuild the PDF around them.
+
+    This drops all vector and text content — useful when the output is only
+    going to be read by an AI vision model, or for heavily-scanned documents
+    that already *are* images. Much more aggressive than normal compression.
+    """
+    start = time.time()
+    original_size = os.path.getsize(input_path)
+
+    src = fitz.open(input_path)
+    try:
+        if src.is_encrypted:
+            src.close()
+            raise click.ClickException(
+                "PDF is encrypted. Please decrypt the file before compressing."
+            )
+
+        total_pages = src.page_count
+        target_pages = pages if pages is not None else list(range(total_pages))
+
+        out = fitz.open()
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                console=console,
+                transient=False,
+            ) as progress:
+                task = progress.add_task(
+                    "Rasterizing pages", total=len(target_pages)
+                )
+                for idx in target_pages:
+                    page = src[idx]
+                    pix = page.get_pixmap(dpi=dpi, alpha=False)
+                    # Route through PIL so we can control quality / subsampling
+                    img = Image.frombytes(
+                        "RGB", (pix.width, pix.height), pix.samples
+                    )
+                    buf = io.BytesIO()
+                    img.save(
+                        buf,
+                        format="JPEG",
+                        quality=jpeg_quality,
+                        optimize=True,
+                        progressive=True,
+                        subsampling=0 if jpeg_quality >= 90 else 2,
+                    )
+                    jpeg_bytes = buf.getvalue()
+
+                    new_page = out.new_page(
+                        width=page.rect.width, height=page.rect.height
+                    )
+                    new_page.insert_image(new_page.rect, stream=jpeg_bytes)
+                    progress.update(task, advance=1)
+
+            if do_ocr:
+                console.print("[cyan]Running OCR on rasterized pages...[/cyan]")
+                ocr_pages = _run_ocr_on_scanned_pages(
+                    out, list(range(out.page_count)), verbose=verbose
+                )
+                if verbose:
+                    console.print(
+                        f"[dim]OCR added text layer to {ocr_pages} page(s)[/dim]"
+                    )
+
+            try:
+                out.set_metadata({})
+            except Exception:
+                pass
+            out.save(
+                output_path,
+                garbage=4,
+                deflate=True,
+                deflate_images=True,
+                deflate_fonts=True,
+                clean=True,
+                pretty=False,
+            )
+        finally:
+            try:
+                out.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            src.close()
+        except Exception:
+            pass
+
+    compressed_size = os.path.getsize(output_path)
+    return {
+        "original_size": original_size,
+        "compressed_size": compressed_size,
+        "pages": len(target_pages),
+        "total_images": len(target_pages),
+        "replaced_images": len(target_pages),
+        "elapsed": time.time() - start,
+        "dpi": dpi,
+        "jpeg_quality": jpeg_quality,
+    }
+
+
+def compress_pdf(
+    input_path: str,
+    output_path: str,
+    dpi: int,
+    jpeg_quality: int,
+    pages: Optional[List[int]] = None,
+    do_ocr: bool = False,
+    verbose: bool = False,
+    rasterize: bool = False,
+) -> dict:
     """Compress a PDF and write to output_path. Returns stats dict."""
+    if rasterize:
+        return rasterize_pdf(
+            input_path=input_path,
+            output_path=output_path,
+            dpi=dpi,
+            jpeg_quality=jpeg_quality,
+            pages=pages,
+            do_ocr=do_ocr,
+            verbose=verbose,
+        )
     start = time.time()
     original_size = os.path.getsize(input_path)
 
@@ -398,6 +625,7 @@ def compress_to_target(
     pages: Optional[List[int]],
     do_ocr: bool,
     verbose: bool,
+    rasterize: bool = False,
 ) -> dict:
     """Binary-search JPEG quality to hit target_mb ±10%.
 
@@ -405,7 +633,9 @@ def compress_to_target(
     """
     target_bytes = target_mb * 1024 * 1024
     tolerance = 0.10
-    low, high = 10, 85
+    # Upper bound is 95 so the search can actually pick near-original quality
+    # when the target is generous. Lower bound stays at 10 for tiny targets.
+    low, high = 10, 95
     best_path: Optional[str] = None
     best_stats: Optional[dict] = None
     max_iters = 6
@@ -431,6 +661,7 @@ def compress_to_target(
                 pages=pages,
                 do_ocr=do_ocr,
                 verbose=verbose,
+                rasterize=rasterize,
             )
             size = stats["compressed_size"]
             if verbose:
@@ -677,7 +908,13 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
             "[yellow]  Note: pytesseract not installed; OCR will be skipped.[/yellow]"
         )
 
-    # 9. Verbose
+    # 9. Rasterize (aggressive: render each page as a JPEG)
+    rasterize = Confirm.ask(
+        "[bold cyan]?[/bold cyan] Rasterize every page (max compression, drops text)?",
+        default=False,
+    )
+
+    # 10. Verbose
     verbose = Confirm.ask("[bold cyan]?[/bold cyan] Verbose output?", default=False)
 
     # Confirmation summary
@@ -693,6 +930,7 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
     summary.add_row("Pages", pages or "all")
     summary.add_row("Split", f"{split_mb} MB" if split_mb else "—")
     summary.add_row("OCR", "yes" if ocr else "no")
+    summary.add_row("Rasterize", "yes" if rasterize else "no")
     summary.add_row("Verbose", "yes" if verbose else "no")
     console.print(summary)
 
@@ -709,6 +947,7 @@ def run_interactive(prefill: Optional[dict] = None) -> dict:
         "pages": pages,
         "split_mb": split_mb,
         "ocr": ocr,
+        "rasterize": rasterize,
         "verbose": verbose,
     }
 
@@ -735,6 +974,7 @@ def _default_state() -> dict:
         "pages": None,         # str or None
         "split_mb": None,      # int MB or None
         "ocr": False,
+        "rasterize": False,
         "verbose": False,
         "output_path": None,   # str or None (None = auto)
     }
@@ -753,6 +993,7 @@ def _print_status(state: dict) -> None:
     t.add_row("pages", state["pages"] or "all")
     t.add_row("split", f"{state['split_mb']} MB" if state["split_mb"] else "—")
     t.add_row("ocr", "on" if state["ocr"] else "off")
+    t.add_row("rasterize", "on" if state.get("rasterize") else "off")
     t.add_row("verbose", "on" if state["verbose"] else "off")
     t.add_row("output", state["output_path"] or "auto ({name}_compressed.pdf)")
     console.print(t)
@@ -771,6 +1012,7 @@ def _print_help() -> None:
     t.add_row("/pages <range> | all", 'Page range, e.g. "1-50" or "1,3,5-10"')
     t.add_row("/split <MB> | off", "Split output into chunks of N MB")
     t.add_row("/ocr on|off", "Toggle OCR text layer")
+    t.add_row("/rasterize on|off", "Aggressive: render each page as a JPEG")
     t.add_row("/verbose on|off", "Toggle verbose logging")
     t.add_row("/output <path> | default", "Set output path template")
     t.add_row("/compress <path>", "Compress a PDF using current settings")
@@ -851,6 +1093,7 @@ def _run_compression_with_state(state: dict, input_path: str) -> None:
                 pages=selected_pages,
                 do_ocr=state["ocr"],
                 verbose=state["verbose"],
+                rasterize=bool(state.get("rasterize")),
             )
         else:
             stats = compress_pdf(
@@ -861,6 +1104,7 @@ def _run_compression_with_state(state: dict, input_path: str) -> None:
                 pages=selected_pages,
                 do_ocr=state["ocr"],
                 verbose=state["verbose"],
+                rasterize=bool(state.get("rasterize")),
             )
     except click.ClickException as exc:
         console.print(f"[red]{exc.message}[/red]")
@@ -1007,6 +1251,16 @@ def _cmd_ocr(state: dict, arg: str) -> bool:
     return False
 
 
+def _cmd_rasterize(state: dict, arg: str) -> bool:
+    v = _parse_on_off(arg) if arg.strip() else (not state.get("rasterize", False))
+    if v is None:
+        console.print("[red]Usage:[/red] /rasterize on|off")
+        return False
+    state["rasterize"] = v
+    console.print(f"[green]rasterize → {'on' if v else 'off'}[/green]")
+    return False
+
+
 def _cmd_verbose(state: dict, arg: str) -> bool:
     v = _parse_on_off(arg) if arg.strip() else (not state["verbose"])
     if v is None:
@@ -1065,6 +1319,7 @@ COMMANDS = {
     "pages": _cmd_pages,
     "split": _cmd_split,
     "ocr": _cmd_ocr,
+    "rasterize": _cmd_rasterize,
     "verbose": _cmd_verbose,
     "output": _cmd_output,
     "compress": _cmd_compress,
@@ -1242,7 +1497,7 @@ __version__ = "0.1.0"
     "--dpi",
     type=int,
     default=None,
-    help="Override preset DPI (low=72, medium=150, high=200).",
+    help="Override preset DPI (low=110, medium=200, high=300).",
 )
 @click.option(
     "--pages",
@@ -1263,6 +1518,15 @@ __version__ = "0.1.0"
     help="Run OCR on scanned pages to add an invisible text layer.",
 )
 @click.option(
+    "--rasterize",
+    is_flag=True,
+    default=False,
+    help=(
+        "Render each page as a single JPEG at the target DPI. Most aggressive "
+        "mode — drops vector/text content. Ideal for AI vision pipelines."
+    ),
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -1281,6 +1545,7 @@ def main(
     pages: Optional[str],
     split_mb: Optional[int],
     ocr: bool,
+    rasterize: bool,
     verbose: bool,
 ) -> None:
     """Entry point."""
@@ -1306,6 +1571,7 @@ def main(
         pages = answers["pages"]
         split_mb = answers["split_mb"]
         ocr = answers["ocr"]
+        rasterize = answers.get("rasterize", False)
         verbose = answers["verbose"]
     elif interactive or input_path is None:
         run_repl(initial_input=input_path)
@@ -1360,6 +1626,7 @@ def main(
                 pages=selected_pages,
                 do_ocr=ocr,
                 verbose=verbose,
+                rasterize=rasterize,
             )
         else:
             stats = compress_pdf(
@@ -1370,6 +1637,7 @@ def main(
                 pages=selected_pages,
                 do_ocr=ocr,
                 verbose=verbose,
+                rasterize=rasterize,
             )
     except click.ClickException:
         raise

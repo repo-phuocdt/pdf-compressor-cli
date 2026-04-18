@@ -17,6 +17,10 @@ REPO_NAME="pdf-compressor-cli"
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
 TAP="${REPO_OWNER}/${REPO_NAME}"
 METHOD="${METHOD:-pipx}"    # pipx (default) | brew
+# If true, the brew path installs from master instead of the pinned tarball.
+# Defaults to true because the pinned tarball can lag several commits behind
+# and users hitting the brew path usually want "latest."
+BREW_HEAD="${BREW_HEAD:-true}"
 
 bold()  { printf "\033[1m%s\033[0m\n" "$*"; }
 info()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
@@ -66,19 +70,44 @@ install_via_brew() {
         brew install tesseract || warn "tesseract install failed; --ocr will be disabled"
     fi
 
-    if brew tap | grep -Fxq "$TAP"; then
+    # `brew tap` is case-insensitive in its listings. Compare in lowercase to
+    # avoid the "already tapped but we can't see it" failure mode.
+    local existing_taps
+    existing_taps="$(brew tap 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    if echo "$existing_taps" | grep -Fxq "$(echo "$TAP" | tr '[:upper:]' '[:lower:]')"; then
         info "tap $TAP already present, skipping"
     else
         info "tapping $TAP from $REPO_URL"
-        brew tap "$TAP" "$REPO_URL"
+        # Always pass the explicit URL. Without it, brew guesses
+        # homebrew-<short> and fails for repos without that prefix — the
+        # classic "Error: Invalid tap name" / "No available formula" story.
+        if ! brew tap "$TAP" "$REPO_URL"; then
+            die "Failed to tap $TAP. Check network access to $REPO_URL."
+        fi
+    fi
+
+    # Fully-qualified formula reference — bypasses any core-formula lookup
+    # ambiguity that produces the "No available formula or cask" error.
+    local formula_ref="${TAP}/pdf-compressor-cli"
+    local head_flag=()
+    if [ "$BREW_HEAD" = "true" ] || [ "$BREW_HEAD" = "1" ]; then
+        head_flag=("--HEAD")
+        info "installing from master HEAD (set BREW_HEAD=false to pin to release)"
     fi
 
     if brew list pdf-compressor-cli >/dev/null 2>&1; then
         info "pdf-compressor-cli already installed — upgrading"
-        brew upgrade pdf-compressor-cli || true
+        brew upgrade "$formula_ref" || brew upgrade pdf-compressor-cli || true
     else
-        info "installing pdf-compressor-cli (builds deps from source; can take a while)"
-        brew install pdf-compressor-cli
+        info "installing $formula_ref (builds PyMuPDF from source; can take a while)"
+        if ! brew install "${head_flag[@]}" "$formula_ref"; then
+            warn "brew install failed. Common causes:"
+            warn "  - PyMuPDF compile errors (missing Xcode CLI tools: 'xcode-select --install')"
+            warn "  - stale tap: try 'brew untap $TAP && rerun this installer'"
+            warn "  - formula not found: run 'brew update' then try again"
+            warn "Falling back to pipx, which uses prebuilt wheels and is much faster."
+            install_via_pipx
+        fi
     fi
 }
 
