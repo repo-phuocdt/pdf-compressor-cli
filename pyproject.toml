@@ -7,7 +7,7 @@ name = "pdf-compressor"
 version = "0.1.0"
 description = "Compress large PDF files to an AI-friendly size (page-by-page, memory efficient)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "pdf-compressor contributors" },
@@ -28,7 +28,7 @@ classifiers = [
 
 dependencies = [
     "pymupdf>=1.23.0",
-    "Pillow>=10.0.0",
+    "Pillow>=13.0.0",
     "click>=8.1.0",
     "rich>=13.0.0",
     "pytesseract>=0.3.10",
