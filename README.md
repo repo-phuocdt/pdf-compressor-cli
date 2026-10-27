@@ -37,7 +37,7 @@ pdf-compressor-cli /path/to/big.pdf
 ## Requirements
 
 - **macOS** (Apple Silicon or Intel)
-- **Python 3.9+**
+- **Python 3.11+**
 - **Homebrew** (used to install `tesseract` for OCR)
 
 ---
